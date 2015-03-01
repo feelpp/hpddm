@@ -82,7 +82,7 @@ class Mumps : public DMatrix {
         /* Variable: strategy
          *  Ordering of the matrix during analysis phase. */
         char                        _strategy;
-        static const std::string   analysis[];
+        static const std::string  _analysis[];
     protected:
         /* Variable: numbering
          *  1-based indexing. */
@@ -123,7 +123,6 @@ class Mumps : public DMatrix {
             _id->jcn_loc = J;
             _id->a_loc = reinterpret_cast<typename MUMPS_STRUC_C<K>::mumps_type*>(C);
             _id->nrhs = 1;
-            _id->icntl[0] = 0; _id->icntl[1] = 0; _id->icntl[2] = 6; _id->icntl[3] = 0;
             _id->icntl[4] = 0;
             if(_strategy > 0 && _strategy < 9 && _strategy != 2) {
                 _id->icntl[27] = 1;             // 1: sequential analysis
@@ -149,7 +148,7 @@ class Mumps : public DMatrix {
             MUMPS_STRUC_C<K>::mumps_c(_id);
             if(DMatrix::_rank == 0) {
                 if(_id->infog[31] == 1 || _id->infog[31] == 2)
-                    std::cout << "                 (memory: " << _id->infog[20] << "MB -- ordering tool: " << analysis[_id->infog[6] + (_id->infog[31] == 1 ? 0 : 8)] << ")" << std::endl;
+                    std::cout << "                 (memory: " << _id->infog[20] << "MB -- ordering tool: " << _analysis[_id->infog[6] + (_id->infog[31] == 1 ? 0 : 8)] << ")" << std::endl;
                 else if(_id->infog[0] != 0)
                     std::cerr << "BUG MUMPS, INFOG(1) = " << _id->infog[0] << std::endl;
             }
@@ -215,7 +214,7 @@ class Mumps : public DMatrix {
 };
 
 template<class K>
-const std::string Mumps<K>::analysis[] = { "AMD", "", "AMF", "SCOTCH", "PORD", "METIS", "QAMD", "automatic sequential", "automatic parallel", "PT-SCOTCH", "ParMetis" };
+const std::string Mumps<K>::_analysis[] { "AMD", "", "AMF", "SCOTCH", "PORD", "METIS", "QAMD", "automatic sequential", "automatic parallel", "PT-SCOTCH", "ParMetis" };
 #endif // DMUMPS
 
 #ifdef MUMPSSUB
@@ -225,7 +224,6 @@ class MumpsSub {
     private:
         typename MUMPS_STRUC_C<K>::trait* _id;
         int*                               _I;
-        char                        _strategy;
     public:
         MumpsSub() : _id(), _I() { }
         MumpsSub(const MumpsSub&) = delete;
@@ -248,18 +246,17 @@ class MumpsSub {
             }
             _id->icntl[23] = detection;
             _id->cntl[2] = -1.0e-6;
-            std::for_each(A->_ja, A->_ja + A->_nnz, [](int& i) { return ++i; });
+            std::for_each(A->_ja, A->_ja + A->_nnz, [](int& i) { ++i; });
             _id->jcn = A->_ja;
             _id->a = reinterpret_cast<typename MUMPS_STRUC_C<K>::mumps_type*>(A->_a);
             int* listvar = nullptr;
             if(_id->job == -1) {
-                _strategy = 3;
+                char strategy = 4;
                 _id->nrhs = 1;
-                _id->icntl[0] = 0; _id->icntl[1] = 0; _id->icntl[2] = 0; _id->icntl[3] = 0;
-                _id->icntl[4] = 0;
-                if(_strategy > 0 && _strategy < 9 && _strategy != 2) {
+                std::fill_n(_id->icntl, 5, 0);
+                if(strategy > 0 && strategy < 9 && strategy != 2) {
                     _id->icntl[27] = 1;             // 1: sequential analysis
-                    _id->icntl[6]  = _strategy - 1; //     0: AMD
+                    _id->icntl[6]  = strategy - 1;  //     0: AMD
                 }                                   //     1:
                                                     //     2: AMF
                                                     //     3: SCOTCH
@@ -302,7 +299,7 @@ class MumpsSub {
             delete [] listvar;
             if(_id->infog[0] != 0)
                 std::cerr << "BUG MUMPS, INFOG(1) = " << _id->infog[0] << std::endl;
-            std::for_each(A->_ja, A->_ja + A->_nnz, [](int& i) { return --i; });
+            std::for_each(A->_ja, A->_ja + A->_nnz, [](int& i) { --i; });
         }
         inline unsigned short deficiency() const { return _id->infog[27]; }
         inline void solve(K* const x, const unsigned short& n = 1) const {

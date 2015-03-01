@@ -143,11 +143,8 @@ class IterativeMethod {
             K* sn = storage + 2 * m + 2;
             K* r = storage + 3 * m + 3;
             K* Ax = r + n;
-            double timing[2];
-            timing[0] = timing[1] = MPI_Wtime();
             std::copy(b, b + n, Ax);
             A.template apply<excluded>(Ax, r);
-            timing[1] -= MPI_Wtime();
             storage[0] = Wrapper<K>::dot(&n, r, &i__1, r, &i__1);
 
             if(!excluded) {
@@ -157,9 +154,7 @@ class IterativeMethod {
                 A.GMV(x, Ax);
             }
             Wrapper<K>::axpby(n, 1.0, b, 1, -1.0, Ax, 1);
-            timing[1] += MPI_Wtime();
             A.template apply<excluded>(Ax, r);
-            timing[1] -= MPI_Wtime();
             storage[1] = Wrapper<K>::dot(&n, r, &i__1, r, &i__1);
             MPI_Allreduce(MPI_IN_PLACE, storage, 2, Wrapper<K>::mpi_type(), MPI_SUM, comm);
 
@@ -207,7 +202,7 @@ class IterativeMethod {
             int i;
             if(Type != CLASSICAL)
                 it = std::max(it, static_cast<unsigned short>((it / m) * m + 3));
-            while(j < it) {
+            while(j <= it) {
                 Wrapper<K>::axpby(n, 1.0 / beta, r, 1, 0.0, v[0], 1);
                 s[0] = beta;
                 MPI_Request rq;
@@ -220,9 +215,7 @@ class IterativeMethod {
 #endif
                     if(!excluded)
                         A.GMV(v[i + (Type != CLASSICAL) * (m + 1)], Ax);
-                    timing[1] += MPI_Wtime();
                     A.template apply<excluded>(Ax, v[m + (Type == CLASSICAL ? 1 : i + 2)], Type == FUSED ? i + (i > 1) : 0);
-                    timing[1] -= MPI_Wtime();
                     if(Type == CLASSICAL || i > 1) {
                         if(Type == CLASSICAL) {
                             if(excluded) {
@@ -233,10 +226,10 @@ class IterativeMethod {
                                 H[i][i + 1] = std::sqrt(beta);
                             }
                             else {
-                                int i_ = i + 1;
-                                Wrapper<K>::gemv(&(Wrapper<K>::transc), &n, &i_, &(Wrapper<K>::d__1), *v, &n, v[m + 1], &i__1, &(Wrapper<K>::d__0), H[i], &i__1);
+                                int tmp = i + 1;
+                                Wrapper<K>::gemv(&(Wrapper<K>::transc), &n, &tmp, &(Wrapper<K>::d__1), *v, &n, v[m + 1], &i__1, &(Wrapper<K>::d__0), H[i], &i__1);
                                 MPI_Allreduce(MPI_IN_PLACE, H[i], i + 1, Wrapper<K>::mpi_type(), MPI_SUM, comm);
-                                Wrapper<K>::gemv(&transa, &n, &i_, &(Wrapper<K>::d__2), *v, &n, H[i], &i__1, &(Wrapper<K>::d__1), v[m + 1], &i__1);
+                                Wrapper<K>::gemv(&transa, &n, &tmp, &(Wrapper<K>::d__2), *v, &n, H[i], &i__1, &(Wrapper<K>::d__1), v[m + 1], &i__1);
                                 beta = Wrapper<K>::dot(&n, v[m + 1], &i__1, v[m + 1], &i__1);
                                 MPI_Allreduce(MPI_IN_PLACE, &beta, 1, Wrapper<typename Wrapper<K>::ul_type>::mpi_type(), MPI_SUM, comm);
                                 H[i][i + 1] = std::sqrt(beta);
@@ -263,10 +256,8 @@ class IterativeMethod {
                         s[i] *= cs[i];
                         if(verbosity)
                             std::cout << "GMRES: " << std::setw(3) << j << " " << std::scientific << std::abs(s[i + 1]) << " " <<  norm << " " <<  std::abs(s[i + 1]) / norm << " < " << tol << std::endl;
-                        if(std::abs(s[i + 1]) / norm <= tol) {
-                            timing[0] -= MPI_Wtime();
+                        if(std::abs(s[i + 1]) / norm <= tol)
                             break;
-                        }
                         if(Type != CLASSICAL) {
                             ++i;
                             delta = K(1.0) / H[i - 1][i];
@@ -314,9 +305,7 @@ class IterativeMethod {
                             A.GMV(x, Ax);
                         }
                         Wrapper<K>::axpby(n, 1.0, b, 1, -1.0, Ax, 1);
-                        timing[1] += MPI_Wtime();
                         A.template apply<excluded>(Ax, r);
-                        timing[1] -= MPI_Wtime();
                         beta = Wrapper<K>::dot(&n, r, &i__1, r, &i__1);
                         MPI_Allreduce(MPI_IN_PLACE, &beta, 1, Wrapper<typename Wrapper<K>::ul_type>::mpi_type(), MPI_SUM, comm);
                         beta = std::sqrt(beta);
@@ -335,7 +324,7 @@ class IterativeMethod {
             it = j;
             if(verbosity) {
                 if(std::abs(s[i + 1]) / norm <= tol)
-                    std::cout << "GMRES converges after " << j << " iteration" << (j > 1 ? "s" : "") << " in " << -timing[0] << ". Time spent preconditioning: " << -timing[1] << std::endl;
+                    std::cout << "GMRES converges after " << j << " iteration" << (j > 1 ? "s" : "") << std::endl;
                 else
                     std::cout << "GMRES does not converges after " << j - 1 << " iteration" << (j > 2 ? "s" : "") << std::endl;
             }
