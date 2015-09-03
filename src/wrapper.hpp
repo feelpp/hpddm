@@ -1,10 +1,11 @@
 /*
    This file is part of HPDDM.
 
-   Author(s): Pierre Jolivet <jolivet@ann.jussieu.fr>
+   Author(s): Pierre Jolivet <pierre.jolivet@inf.ethz.ch>
         Date: 2014-08-04
 
    Copyright (C) 2011-2014 Université de Grenoble
+                 2015      Eidgenössische Technische Hochschule Zürich
 
    HPDDM is free software: you can redistribute it and/or modify
    it under the terms of the GNU Lesser General Public License as published
@@ -46,7 +47,7 @@ class Wrapper {
     public:
         /* Function: mpi_type
          *  Returns the MPI datatype of the template parameter of <Wrapper>. */
-        static inline MPI_Datatype mpi_type();
+        static MPI_Datatype mpi_type();
         /* Typedef: ul_type
          *  Scalar underlying type, e.g. double (resp. float) for std::complex<double> (resp. std::complex<float>). */
         typedef underlying_type<K> ul_type;
@@ -68,85 +69,95 @@ class Wrapper {
 
         /* Function: axpy
          *  Computes a scalar-vector product and adds the result to a vector. */
-        static inline void axpy(const int* const, const K* const, const K* const, const int* const, K* const, const int* const);
+        static void axpy(const int* const, const K* const, const K* const, const int* const, K* const, const int* const);
         /* Function: scal
          *  Computes a scalar-vector product. */
-        static inline void scal(const int* const, const K* const, K* const, const int* const);
+        static void scal(const int* const, const K* const, K* const, const int* const);
         /* Function: nrm2
          *  Computes the Euclidean norm of a vector. */
-        static inline ul_type nrm2(const int* const, const K* const, const int* const);
+        static ul_type nrm2(const int* const, const K* const, const int* const);
         /* Function: dot
          *  Computes a vector-vector dot product. */
-        static inline ul_type dot(const int* const, const K* const, const int* const, const K* const, const int* const);
+        static ul_type dot(const int* const, const K* const, const int* const, const K* const, const int* const);
         /* Function: lacpy
          *  Copies all or part of a two-dimensional matrix. */
-        static inline void lacpy(const char* const, const int* const, const int* const, const K* const, const int* const, K* const, const int* const);
+        static void lacpy(const char* const, const int* const, const int* const, const K* const, const int* const, K* const, const int* const);
 
         /* Function: symv
          *  Computes a symmetric scalar-matrix-vector product. */
-        static inline void symv(const char* const, const int* const, const K* const, const K* const, const int* const,
-                                const K* const, const int* const, const K* const, K* const, const int* const);
+        static void symv(const char* const, const int* const, const K* const, const K* const, const int* const,
+                         const K* const, const int* const, const K* const, K* const, const int* const);
         /* Function: gemv
          *  Computes a scalar-matrix-vector product. */
-        static inline void gemv(const char* const, const int* const, const int* const, const K* const, const K* const,
-                                const int* const, const K* const, const int* const, const K* const, K* const, const int* const);
+        static void gemv(const char* const, const int* const, const int* const, const K* const, const K* const,
+                         const int* const, const K* const, const int* const, const K* const, K* const, const int* const);
 
         /* Function: symm
          *  Computes a symmetric scalar-matrix-matrix product. */
-        static inline void symm(const char* const, const char* const, const int* const, const int* const, const K* const, const K* const,
-                                const int* const, const K* const, const int* const, const K* const, K* const, const int* const);
+        static void symm(const char* const, const char* const, const int* const, const int* const, const K* const, const K* const,
+                         const int* const, const K* const, const int* const, const K* const, K* const, const int* const);
         /* Function: gemm
          *  Computes a scalar-matrix-matrix product. */
-        static inline void gemm(const char* const, const char* const, const int* const, const int* const, const int* const, const K* const, const K* const,
-                                const int* const, const K* const, const int* const, const K* const, K* const, const int* const);
+        static void gemm(const char* const, const char* const, const int* const, const int* const, const int* const, const K* const, const K* const,
+                         const int* const, const K* const, const int* const, const K* const, K* const, const int* const);
 
         /* Function: csrmv(square)
          *  Computes a sparse square matrix-vector product. */
         template<char>
-        static inline void csrmv(bool, const int* const, const K* const, const int* const, const int* const, const K* const, K* const);
+        static void csrmv(bool, const int* const, const K* const, const int* const, const int* const, const K* const, K* const);
         /* Function: csrmv
          *  Computes a scalar-sparse matrix-vector product. */
         template<char>
-        static inline void csrmv(const char* const, const int* const, const int* const, const K* const, bool,
-                                 const K* const, const int* const, const int* const, const K* const, const K* const, K* const);
+        static void csrmv(const char* const, const int* const, const int* const, const K* const, bool,
+                          const K* const, const int* const, const int* const, const K* const, const K* const, K* const);
+        /* Function: csrmm(square)
+         *  Computes a sparse square matrix-matrix product. */
+        template<char>
+        static void csrmm(bool, const int* const, const int* const, const K* const, const int* const, const int* const, const K* const, K* const);
         /* Function: csrmm
          *  Computes a scalar-sparse matrix-matrix product. */
         template<char>
-        static inline void csrmm(const char* const, const int* const, const int* const, const int* const, const K* const, bool,
-                                 const K* const, const int* const, const int* const, const K* const, const int* const,
-                                 const K* const, K* const, const int* const);
+        static void csrmm(const char* const, const int* const, const int* const, const int* const, const K* const, bool,
+                          const K* const, const int* const, const int* const, const K* const, const int* const,
+                          const K* const, K* const, const int* const);
 
         /* Function: csrcsc
          *  Converts a matrix stored in Compressed Sparse Row format into Compressed Sparse Column format. */
         template<char>
-        static inline void csrcsc(const int* const, K* const, int* const, int* const, K* const, int* const, int* const);
+        static void csrcsc(const int* const, K* const, int* const, int* const, K* const, int* const, int* const);
         /* Function: gthr
          *  Gathers the elements of a full-storage sparse vector into compressed form. */
-        static inline void gthr(const int&, const K* const, K* const, const int* const);
+        static void gthr(const int&, const K* const, K* const, const int* const);
         /* Function: sctr
          *  Scatters the elements of a compressed sparse vector into full-storage form. */
-        static inline void sctr(const int&, const K* const, const int* const, K* const);
-        /* Function: diagv(in-place)
+        static void sctr(const int&, const K* const, const int* const, K* const);
+        /* Function: diag(in-place)
          *  Computes a vector-vector element-wise multiplication. */
-        static inline void diagv(const int&, const ul_type* const, K* const);
-        /* Function: diagv
+        static void diag(const int&, const ul_type* const, K* const);
+        /* Function: diag
          *  Computes a vector-vector element-wise multiplication. */
-        static inline void diagv(const int&, const ul_type* const, const K* const, K* const);
-        /* Function: diagm
+        static void diag(const int&, const ul_type* const, const K* const, K* const);
+        /* Function: diag(in-place)
          *  Computes a vector-matrix element-wise multiplication. */
-        static inline void diagm(const int&, const int&, const ul_type* const, const K* const, K* const);
+        static void diag(const int&, const int&, const ul_type* const, K* const);
+        /* Function: diag
+         *  Computes a vector-matrix element-wise multiplication. */
+        static void diag(const int&, const int&, const ul_type* const, const K* const, K* const);
         /* Function: axpby
          *  Computes two scalar-vector products. */
-        static inline void axpby(const int&, const K&, const K* const, const int&, const K&, K* const, const int&);
+        static void axpby(const int&, const K&, const K* const, const int&, const K&, K* const, const int&);
         /* Function: conjugate
          *  Conjugates all elements of a matrix. */
         template<class T, typename std::enable_if<!std::is_same<T, typename Wrapper<T>::ul_type>::value>::type* = nullptr>
-        static inline void conjugate(const int& m, const int& n, const int& ld, T* const in) {
+        static void conjugate(const int& m, const int& n, const int& ld, T* const in) {
             for(int i = 0; i < n; ++i)
                 std::for_each(in + i * ld, in + i * ld + m, [](T& z) { z = std::conj(z); });
         }
         template<class T, typename std::enable_if<std::is_same<T, typename Wrapper<T>::ul_type>::value>::type* = nullptr>
-        static inline void conjugate(const int&, const int&, const int&, T* const) { }
+        static void conjugate(const int&, const int&, const int&, T* const) { }
+        /* Function: transpose
+         *  Transposes a dense matrix in-place. */
+        static void transpose(K* const, const std::size_t, const std::size_t);
 };
 
 template<>
@@ -268,8 +279,12 @@ HPDDM_GENERATE_BLAS_COMPLEX(c, std::complex<float>, s, float)
 HPDDM_GENERATE_BLAS_COMPLEX(z, std::complex<double>, d, double)
 
 template<class K>
-inline void Wrapper<K>::diagv(const int& n, const ul_type* const d, K* const in) {
-    diagv(n, d, nullptr, in);
+inline void Wrapper<K>::diag(const int& n, const ul_type* const d, K* const in) {
+    diag(n, d, nullptr, in);
+}
+template<class K>
+inline void Wrapper<K>::diag(const int& m, const int& n, const ul_type* const d, K* const in) {
+    diag(m, n, d, nullptr, in);
 }
 
 #if HPDDM_MKL
@@ -317,12 +332,24 @@ inline void Wrapper<T>::csrmm(const char* const trans, const int* const m, const
                               const T* const a, const int* const ia, const int* const ja,                    \
                               const T* const x, const int* const ldb, const T* const beta,                   \
                               T* const y, const int* const ldc) {                                            \
-    mkl_ ## C ## csrmm(HPDDM_CONST(char, trans), HPDDM_CONST(int, m), HPDDM_CONST(int, n),                   \
-                       HPDDM_CONST(int, k), HPDDM_CONST(T, alpha),                                           \
-                       HPDDM_CONST(char, sym ? matdescr<N>::b : matdescr<N>::a), HPDDM_CONST(T, a),          \
-                       HPDDM_CONST(int, ja), HPDDM_CONST(int, ia), HPDDM_CONST(int, ia) + 1,                 \
-                       HPDDM_CONST(T, x), HPDDM_CONST(int, ldb), HPDDM_CONST(T, beta),  y,                   \
-                       HPDDM_CONST(int, ldc));                                                               \
+    if(*n != 1) {                                                                                            \
+        if(N != 'F') {                                                                                       \
+            std::for_each(const_cast<int*>(ja), const_cast<int*>(ja) + ia[*m], [](int& i) { ++i; });         \
+            std::for_each(const_cast<int*>(ia), const_cast<int*>(ia) + *m + 1, [](int& i) { ++i; });         \
+        }                                                                                                    \
+        mkl_ ## C ## csrmm(HPDDM_CONST(char, trans), HPDDM_CONST(int, m), HPDDM_CONST(int, n),               \
+                           HPDDM_CONST(int, k), HPDDM_CONST(T, alpha),                                       \
+                           HPDDM_CONST(char, sym ? matdescr<'F'>::b : matdescr<'F'>::a), HPDDM_CONST(T, a),  \
+                           HPDDM_CONST(int, ja), HPDDM_CONST(int, ia), HPDDM_CONST(int, ia) + 1,             \
+                           HPDDM_CONST(T, x), HPDDM_CONST(int, ldb), HPDDM_CONST(T, beta),  y,               \
+                           HPDDM_CONST(int, ldc));                                                           \
+        if(N != 'F') {                                                                                       \
+            std::for_each(const_cast<int*>(ia), const_cast<int*>(ia) + *m + 1, [](int& i) { --i; });         \
+            std::for_each(const_cast<int*>(ja), const_cast<int*>(ja) + ia[*m], [](int& i) { --i; });         \
+        }                                                                                                    \
+    }                                                                                                        \
+    else                                                                                                     \
+        csrmv<N>(trans, m, k, alpha, sym, a, ia, ja, x, beta, y);                                            \
 }                                                                                                            \
                                                                                                              \
 template<>                                                                                                   \
@@ -340,20 +367,25 @@ inline void Wrapper<T>::gthr(const int& n, const T* const y, T* const x, const i
 template<>                                                                                                   \
 inline void Wrapper<T>::sctr(const int& n, const T* const x, const int* const indx, T* const y) {            \
     cblas_ ## C ## sctr(n, x, indx, y);                                                                      \
+}                                                                                                            \
+template<>                                                                                                   \
+inline void Wrapper<T>::transpose(T* const a, const std::size_t n, const std::size_t m) {                    \
+    mkl_ ## C ## imatcopy('C', 'T', m, n, d__1, a, m, n);                                                    \
 }
 #define HPDDM_GENERATE_MKL_VML(C, T)                                                                         \
 template<>                                                                                                   \
-inline void Wrapper<T>::diagv(const int& n, const T* const d, const T* const in, T* const out) {             \
+inline void Wrapper<T>::diag(const int& m, const int& n, const T* const d,                                   \
+                             const T* const in, T* const out) {                                              \
     if(in)                                                                                                   \
-        v ## C ## Mul(n, d, in, out);                                                                        \
+        for(int i = 0; i < n; ++i)                                                                           \
+            v ## C ## Mul(m, d, in + i * m, out + i * m);                                                    \
     else                                                                                                     \
-        v ## C ## Mul(n, d, out, out);                                                                       \
+        for(int i = 0; i < n; ++i)                                                                           \
+            v ## C ## Mul(m, d, out + i * m, out + i * m);                                                   \
 }                                                                                                            \
 template<>                                                                                                   \
-inline void Wrapper<T>::diagm(const int& m, const int& n, const T* const d,                                  \
-                              const T* const in, T* const out) {                                             \
-    for(int i = 0; i < n; ++i)                                                                               \
-        v ## C ## Mul(m, d, in + i * m, out + i * m);                                                        \
+inline void Wrapper<T>::diag(const int& n, const T* const d, const T* const in, T* const out) {              \
+    diag(n, i__1, d, in, out);                                                                               \
 }
 HPDDM_GENERATE_MKL(s, float)
 HPDDM_GENERATE_MKL(d, double)
@@ -443,6 +475,8 @@ template<char N>
 inline void Wrapper<K>::csrmm(const char* const trans, const int* const m, const int* const n, const int* const k, const K* const alpha, bool sym,
                               const K* const a, const int* const ia, const int* const ja, const K* const x, const int* const ldb, const K* const beta, K* const y, const int* const ldc) {
     if(trans == &transa) {
+        if(*ldb != *k || *ldc != *m)
+            return;
         int dimY = *m;
         K* res;
         if(sym) {
@@ -461,7 +495,7 @@ inline void Wrapper<K>::csrmm(const char* const trans, const int* const m, const
                     if(i != j)
                         for(int r = 0; r < *n; ++r) {
                             res[r] += a[l] * x[j + r * dimX];
-                            y[j + r * dimY] += *alpha * a[l] * x[i + r * dimX];
+                            y[j + r * *ldb] += *alpha * a[l] * x[i + r * *ldc];
                         }
                     else
                         axpy(n, a + l, x + j, k, res, &i__1);
@@ -486,6 +520,8 @@ inline void Wrapper<K>::csrmm(const char* const trans, const int* const m, const
         }
     }
     else {
+        if(*ldb != *m || *ldc != *k)
+            return;
         int dimX = *m;
         int dimY = *k;
         int dimNY = dimY * *n;
@@ -565,22 +601,55 @@ inline void Wrapper<K>::axpby(const int& n, const K& alpha, const K* const u, co
             v[i * incy] = alpha * u[i * incx] + beta * v[i * incy];
 }
 #endif // __APPLE__
+template<class K>
+inline void Wrapper<K>::transpose(K* const a, const std::size_t n, const std::size_t m) {
+    if(n != m) {
+        if(n != 1 && m != 1) {
+            const int size = n * m - 1;
+            std::bitset<1024> b;
+            b[0] = b[size] = 1;
+            int i = 1;
+            while(i < size) {
+                int it = i;
+                K t = a[i];
+                do {
+                    int next = (i * n) % size;
+                    std::swap(a[next], t);
+                    b[i] = 1;
+                    i = next;
+                } while(i != it);
+
+                for(i = 1; i < size && b[i]; i++);
+            }
+        }
+    }
+    else {
+        for(int i = 0; i < n - 1; ++i)
+            for(int j = i + 1; j < n; ++j)
+                std::swap(a[i * n + j], a[j * n + i]);
+    }
+}
 #endif // HPDDM_MKL
 
 template<class K>
-inline void Wrapper<K>::diagv(const int& n, const ul_type* const d, const K* const in, K* const out) {
-    if(in)
-        for(unsigned int i = 0; i < n; ++i)
-            out[i] = d[i] * in[i];
-    else
-        for(unsigned int i = 0; i < n; ++i)
-            out[i] *= d[i];
+inline void Wrapper<K>::diag(const int& n, const ul_type* const d, const K* const in, K* const out) {
+    diag(n, i__1, d, in, out);
 }
 template<class K>
-inline void Wrapper<K>::diagm(const int& m, const int& n, const ul_type* const d, const K* const in, K* const out) {
-    for(int i = 0; i < n; ++i)
-        for(int j = 0; j < m; ++j)
-            out[j + i * m] = d[j] * in[j + i * m];
+inline void Wrapper<K>::diag(const int& m, const int& n, const ul_type* const d, const K* const in, K* const out) {
+    if(in)
+        for(int i = 0; i < n; ++i)
+            for(int j = 0; j < m; ++j)
+                out[j + i * m] = d[j] * in[j + i * m];
+    else
+        for(int i = 0; i < n; ++i)
+            for(int j = 0; j < m; ++j)
+                out[j + i * m] *= d[j];
+}
+template<class K>
+template<char N>
+inline void Wrapper<K>::csrmm(bool sym, const int* const n, const int* const m, const K* const a, const int* const ia, const int* const ja, const K* const x, K* const y) {
+    csrmm<N>(&transa, n, m, n, &d__1, sym, a, ia, ja, x, n, &d__0, y, n);
 }
 
 template<class Idx, class T>
@@ -596,6 +665,7 @@ inline void reorder(const Idx& i, const Idx& j, const First& first, const Rest&.
  *  Rearranges an arbitrary number of containers based on the permutation defined by the first argument. */
 template<class T, class... Args>
 inline void reorder(std::vector<T>& order, const Args&... args) {
+    static_assert(sizeof...(args) > 0, "Nothing to reorder");
     for(T i = 0; i < order.size() - 1; ++i) {
         T j = order[i];
         if(j != i) {

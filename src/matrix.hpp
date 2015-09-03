@@ -1,10 +1,11 @@
 /*
    This file is part of HPDDM.
 
-   Author(s): Pierre Jolivet <jolivet@ann.jussieu.fr>
+   Author(s): Pierre Jolivet <pierre.jolivet@inf.ethz.ch>
         Date: 2013-03-12
 
    Copyright (C) 2011-2014 Université de Grenoble
+                 2015      Eidgenössische Technische Hochschule Zürich
 
    HPDDM is free software: you can redistribute it and/or modify
    it under the terms of the GNU Lesser General Public License as published
@@ -22,9 +23,6 @@
 
 #ifndef _MATRIX_
 #define _MATRIX_
-
-#include <iostream>
-#include <iomanip>
 
 namespace HPDDM {
 /* Class: MatrixCSR
@@ -80,10 +78,12 @@ class MatrixCSR {
          *
          * Parameter:
          *    A              - Input matrix. */
-        inline bool sameSparsity(MatrixCSR<K>* const& A) const {
+        bool sameSparsity(MatrixCSR<K>* const& A) const {
             if(A->_sym == _sym && A->_nnz >= _nnz) {
                 if(A->_ia == _ia && A->_ja == _ja)
                     return true;
+                else if(!A->_free)
+                    return false;
                 else {
                     bool same = true;
                     K* a = new K[_nnz];
@@ -127,12 +127,14 @@ class MatrixCSR {
             int old = f.precision();
             for(unsigned int i = 0; i < _n; ++i) {
                 unsigned int ke = _ia[i + 1] - (N == 'F');
-                for( ; k < ke; ++k)
-                    f << std::setw(9) << i + 1 << " " << std::setw(9) << _ja[k] + (N == 'C') << " " << std::setprecision(20) << _a[k] << std::endl;
+                while(k < ke)
+                    f << std::setw(9) << i + 1 << std::setw(9) << _ja[k] + (N == 'C') << " " << std::setprecision(20) << _a[k++] << std::endl;
             }
             f.precision(old);
             return f;
         }
 };
+template<class K>
+inline std::ostream& operator <<(std::ostream& f, const MatrixCSR<K>& m) { return m.dump(f); }
 } // HPDDM
 #endif // _MATRIX_

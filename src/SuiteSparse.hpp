@@ -1,10 +1,11 @@
 /*
    This file is part of HPDDM.
 
-   Author(s): Pierre Jolivet <jolivet@ann.jussieu.fr>
+   Author(s): Pierre Jolivet <pierre.jolivet@inf.ethz.ch>
         Date: 2014-11-06
 
    Copyright (C) 2011-2014 Université de Grenoble
+                 2015      Eidgenössische Technische Hochschule Zürich
 
    HPDDM is free software: you can redistribute it and/or modify
    it under the terms of the GNU Lesser General Public License as published
@@ -23,8 +24,7 @@
 #ifndef _SUITESPARSE_
 #define _SUITESPARSE_
 
-template<class K>
-class SuiteSparse;
+namespace HPDDM { template<class K> class SuiteSparse; }
 
 #if HPDDM_SCHWARZ || HPDDM_FETI || HPDDM_BDD
 #if !defined(COARSEOPERATOR) && !defined(DSUITESPARSE)
@@ -41,61 +41,58 @@ class SuiteSparse;
 namespace HPDDM {
 template<class K>
 struct stsprs {
-    static_assert(std::is_same<double, typename Wrapper<K>::ul_type>::value, "UMFPACK only supports double-precision floating point scalars");
+    static_assert(std::is_same<double, typename Wrapper<K>::ul_type>::value, "UMFPACK only supports double-precision floating-point scalars");
 };
 
 template<>
 struct stsprs<double> {
-    static inline void umfpack_defaults(double control[UMFPACK_CONTROL]) {
+    static void umfpack_defaults(double* control) {
         umfpack_di_defaults(control);
     }
-    static inline void umfpack_report_info(const double control[UMFPACK_CONTROL], const double info[UMFPACK_INFO]) {
+    static void umfpack_report_info(const double* control, const double* info) {
         umfpack_di_report_info(control, info);
     }
-    static inline int umfpack_numeric(const int* ia, const int* ja, const double* a, void* symbolic, void** numeric, const double control[UMFPACK_CONTROL], double info[UMFPACK_INFO]) {
+    static int umfpack_numeric(const int* ia, const int* ja, const double* a, void* symbolic, void** numeric, const double* control, double* info) {
         return umfpack_di_numeric(ia, ja, a, symbolic, numeric, control, info);
     }
-    static inline int umfpack_symbolic(int n, int m, const int* ia, const int* ja, const double* a, void** symbolic, const double control[UMFPACK_CONTROL], double info[UMFPACK_INFO]) {
+    static int umfpack_symbolic(int n, int m, const int* ia, const int* ja, const double* a, void** symbolic, const double* control, double* info) {
         return umfpack_di_symbolic(n, m, ia, ja, a, symbolic, control, info);
     }
-    static inline void umfpack_free_symbolic(void** symbolic) {
+    static void umfpack_free_symbolic(void** symbolic) {
         umfpack_di_free_symbolic(symbolic);
     }
-    static inline int umfpack_wsolve(int sys, const int* ia, const int* ja, const double* a, double* X, const double* B, void* numeric, const double control[UMFPACK_CONTROL], double info[UMFPACK_INFO], int* Wi, double* W) {
+    static int umfpack_wsolve(int sys, const int* ia, const int* ja, const double* a, double* X, const double* B, void* numeric, const double* control, double* info, int* Wi, double* W) {
         return umfpack_di_wsolve(sys, ia, ja, a, X, B, numeric, control, info, Wi, W);
     }
-    static inline void umfpack_free_numeric(void** numeric) {
+    static void umfpack_free_numeric(void** numeric) {
         umfpack_di_free_numeric(numeric);
     }
 };
 
 template<>
 struct stsprs<std::complex<double>> {
-    static inline void umfpack_defaults(double control[UMFPACK_CONTROL]) {
+    static void umfpack_defaults(double* control) {
         umfpack_zi_defaults(control);
     }
-    static inline void umfpack_report_info(const double control[UMFPACK_CONTROL], const double info[UMFPACK_INFO]) {
+    static void umfpack_report_info(const double* control, const double* info) {
         umfpack_zi_report_info(control, info);
     }
-    static inline int umfpack_numeric(const int* ia, const int* ja, const std::complex<double>* a, void* symbolic, void** numeric, const double control[UMFPACK_CONTROL], double info[UMFPACK_INFO]) {
+    static int umfpack_numeric(const int* ia, const int* ja, const std::complex<double>* a, void* symbolic, void** numeric, const double* control, double* info) {
         return umfpack_zi_numeric(ia, ja, reinterpret_cast<const double*>(a), NULL, symbolic, numeric, control, info);
     }
-    static inline int umfpack_symbolic(int n, int m, const int* ia, const int* ja, const std::complex<double>* a, void** symbolic, const double control[UMFPACK_CONTROL], double info[UMFPACK_INFO]) {
+    static int umfpack_symbolic(int n, int m, const int* ia, const int* ja, const std::complex<double>* a, void** symbolic, const double* control, double* info) {
         return umfpack_zi_symbolic(n, m, ia, ja, reinterpret_cast<const double*>(a), NULL, symbolic, control, info);
     }
-    static inline void umfpack_free_symbolic(void** symbolic) {
+    static void umfpack_free_symbolic(void** symbolic) {
         umfpack_zi_free_symbolic(symbolic);
     }
-    static inline int umfpack_wsolve(int sys, const int* ia, const int* ja, const std::complex<double>* a, std::complex<double>* X, const std::complex<double>* B, void* numeric, const double control[UMFPACK_CONTROL], double info[UMFPACK_INFO], int* Wi, std::complex<double>* W) {
+    static int umfpack_wsolve(int sys, const int* ia, const int* ja, const std::complex<double>* a, std::complex<double>* X, const std::complex<double>* B, void* numeric, const double* control, double* info, int* Wi, std::complex<double>* W) {
         return umfpack_zi_wsolve(sys, ia, ja, reinterpret_cast<const double*>(a), NULL, reinterpret_cast<double*>(X), NULL, reinterpret_cast<const double*>(B), NULL, numeric, control, info, Wi, reinterpret_cast<double*>(W));
     }
-    static inline void umfpack_free_numeric(void** numeric) {
+    static void umfpack_free_numeric(void** numeric) {
         umfpack_zi_free_numeric(numeric);
     }
 };
-
-template<class K>
-class SuiteSparse;
 
 #ifdef DSUITESPARSE
 #define COARSEOPERATOR HPDDM::SuiteSparse
@@ -166,8 +163,7 @@ class SuiteSparse : public DMatrix {
             }
         }
         template<char S>
-        inline void numfact(unsigned int ncol, int* I, int* J, K* C) {
-            static_assert(S == 'S' || std::is_same<double, typename Wrapper<K>::ul_type>::value, "UMFPACK only supports double-precision floating point scalars");
+        void numfact(unsigned int ncol, int* I, int* J, K* C) {
             if(S == 'S') {
                 _c = new cholmod_common;
                 cholmod_start(_c);
@@ -186,7 +182,8 @@ class SuiteSparse : public DMatrix {
                 M->dtype = std::is_same<double, typename Wrapper<K>::ul_type>::value ? CHOLMOD_DOUBLE : CHOLMOD_SINGLE;
                 M->itype = CHOLMOD_INT;
                 _L = cholmod_analyze(M, _c);
-                cholmod_print_common(NULL, _c);
+                if(Option::get()->val("verbosity") > 1)
+                    cholmod_print_common(NULL, _c);
                 cholmod_factorize(M, _L, _c);
                 _b = static_cast<cholmod_dense*>(cholmod_malloc(1, sizeof(cholmod_dense), _c));
                 _b->nrow = M->nrow;
@@ -216,14 +213,15 @@ class SuiteSparse : public DMatrix {
                 void* symbolic;
                 stsprs<K>::umfpack_symbolic(ncol, ncol, I, J, C, &symbolic, _control, info);
                 stsprs<K>::umfpack_numeric(I, J, C, symbolic, &_numeric, _control, info);
-                stsprs<K>::umfpack_report_info(_control, info);
+                if(Option::get()->val("verbosity") > 1)
+                    stsprs<K>::umfpack_report_info(_control, info);
                 stsprs<K>::umfpack_free_symbolic(&symbolic);
                 delete [] info;
             }
             delete [] I;
         }
         template<DMatrix::Distribution D>
-        inline void solve(K* rhs) {
+        void solve(K* rhs) {
             if(_c) {
                 _b->ncol = 1;
                 _b->nzmax = _x->nrow;
@@ -235,18 +233,10 @@ class SuiteSparse : public DMatrix {
             }
             else
                 stsprs<K>::umfpack_wsolve(UMFPACK_Aat, NULL, NULL, NULL, _tmp, rhs, _numeric, _control, NULL, _pattern, _W);
-            std::copy(_tmp, _tmp + DMatrix::_n, rhs);
+            std::copy_n(_tmp, DMatrix::_n, rhs);
         }
-        template<class Container>
-        inline void initialize(Container& parm) {
-            if(DMatrix::_communicator != MPI_COMM_NULL)
-                MPI_Comm_rank(DMatrix::_communicator, &(DMatrix::_rank));
-            if(parm[DISTRIBUTION] != DMatrix::NON_DISTRIBUTED) {
-                if(DMatrix::_communicator != MPI_COMM_NULL && DMatrix::_rank == 0)
-                    std::cout << "WARNING -- only non distributed solution and RHS supported by the SuiteSparse interface, forcing the distribution to NON_DISTRIBUTED" << std::endl;
-                parm[DISTRIBUTION] = DMatrix::NON_DISTRIBUTED;
-            }
-            DMatrix::_distribution = DMatrix::NON_DISTRIBUTED;
+        void initialize() {
+            DMatrix::initialize("SuiteSparse", { CENTRALIZED });
         }
 };
 #endif // DSUITESPARSE
@@ -281,14 +271,16 @@ class SuiteSparseSub {
                 cholmod_free_dense(&_E, _c);
                 cholmod_finish(_c);
                 delete _c;
+                _c = nullptr;
             }
             else {
                 delete [] _pattern;
                 delete [] _control;
+                _control = nullptr;
                 stsprs<K>::umfpack_free_numeric(&_numeric);
             }
         }
-        inline void numfact(MatrixCSR<K>* const& A, bool detection = false) {
+        void numfact(MatrixCSR<K>* const& A, bool detection = false) {
             if(A->_sym && std::is_same<K, typename Wrapper<K>::ul_type>::value) {
                 if(!_c) {
                     _c = new cholmod_common;
@@ -396,7 +388,7 @@ class SuiteSparseSub {
                 delete [] info;
             }
         }
-        inline void solve(K* const x) const {
+        void solve(K* const x) const {
             if(_c) {
                 _b->ncol = 1;
                 _b->nzmax = _x->nrow;
@@ -405,14 +397,14 @@ class SuiteSparseSub {
                 _x->nzmax = _x->nrow;
                 _x->x = _tmp;
                 cholmod_solve2(CHOLMOD_A, _L, _b, NULL, &_x, NULL, &_Y, &_E, _c);
-                std::copy(_tmp, _tmp + _x->nrow, x);
+                std::copy_n(_tmp, _x->nrow, x);
             }
             else {
                 stsprs<K>::umfpack_wsolve(UMFPACK_Aat, NULL, NULL, NULL, _tmp, x, _numeric, _control, NULL, _pattern, _W);
                 std::copy(_tmp, _W, x);
             }
         }
-        inline void solve(K* const x, const unsigned short& n) const {
+        void solve(K* const x, const unsigned short& n) const {
             if(_c) {
                 _b->ncol = n;
                 _b->nzmax = _x->nrow;
@@ -421,7 +413,7 @@ class SuiteSparseSub {
                 _x->nzmax = _x->nrow;
                 _x->x = new K[n * _x->nrow];
                 cholmod_solve2(CHOLMOD_A, _L, _b, NULL, &_x, NULL, &_Y, &_E, _c);
-                std::copy(static_cast<K*>(_x->x), static_cast<K*>(_x->x) + n * _x->nrow, x);
+                std::copy_n(static_cast<K*>(_x->x), n * _x->nrow, x);
                 delete [] static_cast<K*>(_x->x);
                 _x->x = NULL;
             }
@@ -433,18 +425,21 @@ class SuiteSparseSub {
                 }
             }
         }
-        inline void solve(const K* const b, K* const x) const {
+        void solve(const K* const b, K* const x, const unsigned short& n = 1) const {
             if(_c) {
-                _b->ncol = 1;
+                _b->ncol = n;
                 _b->nzmax = _x->nrow;
                 _b->x = const_cast<K*>(b);
-                _x->ncol = 1;
+                _x->ncol = n;
                 _x->nzmax = _x->nrow;
                 _x->x = x;
                 cholmod_solve2(CHOLMOD_A, _L, _b, NULL, &_x, NULL, &_Y, &_E, _c);
             }
-            else
-                stsprs<K>::umfpack_wsolve(UMFPACK_Aat, NULL, NULL, NULL, x, b, _numeric, _control, NULL, _pattern, _W);
+            else {
+                int ld = std::distance(_tmp, _W);
+                for(unsigned short i = 0; i < n; ++i)
+                    stsprs<K>::umfpack_wsolve(UMFPACK_Aat, NULL, NULL, NULL, x + i * ld, b + i * ld, _numeric, _control, NULL, _pattern, _W);
+            }
         }
 };
 #endif // SUITESPARSESUB

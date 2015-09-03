@@ -23,6 +23,15 @@
 #ifndef _PRECONDITIONER_
 #define _PRECONDITIONER_
 
+#define HPDDM_LAMBDA_F(in, input, inout, output, N)                                                          \
+    unsigned short* input = static_cast<unsigned short*>(in);                                                \
+    unsigned short* output = static_cast<unsigned short*>(inout);                                            \
+    output[0] = std::max(output[0], input[0]);                                                               \
+    output[1] = output[1] & input[1];                                                                        \
+    output[2] = output[2] & input[2];                                                                        \
+    if(N == 3)                                                                                               \
+        output[3] = output[3] & input[3];
+
 #include "subdomain.hpp"
 
 namespace HPDDM {
@@ -49,6 +58,13 @@ class Preconditioner : public Subdomain<K> {
         /* Variable: uc
          *  Workspace array of size <Coarse operator::local>. */
         K*                 _uc;
+#ifdef __MINGW32__
+    private:
+        template<unsigned short N>
+        static void __stdcall f(void* in, void* inout, int*, MPI_Datatype*) {
+            HPDDM_LAMBDA_F(in, input, inout, output, N)
+        }
+#endif
     public:
         Preconditioner() : _co(), _ev(), _uc() { }
         Preconditioner(const Preconditioner&) = delete;
@@ -59,13 +75,16 @@ class Preconditioner : public Subdomain<K> {
             delete [] _ev;
             delete [] _uc;
         }
+        /* Typedef: super
+         *  Type of the immediate parent class <Subdomain>. */
+        typedef Subdomain<K> super;
         /* Function: initialize
          *
          *  Initializes a two-level preconditioner.
          *
          * Parameter:
          *    deflation      - Number of local deflation vectors. */
-        inline void initialize(const unsigned short& deflation) {
+        void initialize(const unsigned short& deflation) {
             if(!_co) {
                 _co = new CoarseOperator;
                 _co->setLocal(deflation);
@@ -78,9 +97,7 @@ class Preconditioner : public Subdomain<K> {
          * Parameters:
          *    x              - Input right-hand sides, solution vectors are stored in-place.
          *    n              - Number of input right-hand sides. */
-        inline void callSolve(K* const x, const unsigned short& n = 1) const {
-            _s.solve(x, n);
-        }
+        void callSolve(K* const x, const unsigned short& n = 1) const { _s.solve(x, n); }
         /* Function: buildTwo
          *
          *  Assembles and factorizes the coarse operator.
@@ -90,69 +107,72 @@ class Preconditioner : public Subdomain<K> {
          *
          * Parameters:
          *    A              - Operator used in the definition of the Galerkin matrix.
-         *    comm           - Global MPI communicator.
-         *    parm           - Vector of parameters. */
-        template<unsigned short excluded, unsigned short N, class Operator, class Container>
-        inline std::pair<MPI_Request, const K*>* buildTwo(Operator&& A, const MPI_Comm& comm, Container& parm) {
-            static_assert(N == 2 || N == 3, "Wrong template parameter");
+         *    comm           - Global MPI communicator. */
+        template<unsigned short excluded, class Operator, class Prcndtnr>
+        std::pair<MPI_Request, const K*>* buildTwo(Prcndtnr* B, const MPI_Comm& comm) {
+            static_assert(std::is_same<typename Prcndtnr::super&, decltype(*this)>::value || std::is_same<typename Prcndtnr::super::super&, decltype(*this)>::value, "Wrong preconditioner");
             std::pair<MPI_Request, const K*>* ret = nullptr;
+            constexpr unsigned short N = std::is_same<typename Prcndtnr::super&, decltype(*this)>::value ? 2 : 3;
             unsigned short allUniform[N + 1];
             allUniform[0] = Subdomain<K>::_map.size();
-            allUniform[1] = parm[NU];
-            allUniform[2] = static_cast<unsigned short>(~parm[NU]);
+            const Option& opt = *Option::get();
+            unsigned short nu = allUniform[1] = (_co ? _co->getLocal() : static_cast<unsigned short>(opt["geneo_nu"]));
+            allUniform[2] = static_cast<unsigned short>(~nu);
             if(N == 3)
-                allUniform[3] = parm[NU] > 0 ? parm[NU] : std::numeric_limits<unsigned short>::max();
+                allUniform[3] = nu > 0 ? nu : std::numeric_limits<unsigned short>::max();
             {
-                auto f = [](void* in, void* inout, int*, MPI_Datatype*) -> void {
-                    unsigned short* input = static_cast<unsigned short*>(in);
-                    unsigned short* output = static_cast<unsigned short*>(inout);
-                    output[0] = std::max(output[0], input[0]);
-                    output[1] = output[1] & input[1];
-                    output[2] = output[2] & input[2];
-                    if(N == 3)
-                        output[3] = output[3] & input[3];
-                };
                 MPI_Op op;
+#ifndef __MINGW32__
+                auto f = [](void* in, void* inout, int*, MPI_Datatype*) -> void {
+                    HPDDM_LAMBDA_F(in, input, inout, output, N)
+                };
                 MPI_Op_create(f, 1, &op);
+#else
+                MPI_Op_create(&f<N>, 1, &op);
+#endif
                 MPI_Allreduce(MPI_IN_PLACE, allUniform, N + 1, MPI_UNSIGNED_SHORT, op, comm);
                 MPI_Op_free(&op);
             }
-            A.sparsity(allUniform[0]);
-            if(parm[NU] > 0 || allUniform[1] != 0 || allUniform[2] != std::numeric_limits<unsigned short>::max()) {
-                if(!_co)
+            if(nu > 0 || allUniform[1] != 0 || allUniform[2] != std::numeric_limits<unsigned short>::max()) {
+                if(!_co) {
                     _co = new CoarseOperator;
-
-                _co->setLocal(parm[NU]);
-
+                    _co->setLocal(nu);
+                }
                 double construction = MPI_Wtime();
-                if(allUniform[1] == parm[NU] && allUniform[2] == static_cast<unsigned short>(~parm[NU]))
-                    ret = _co->template construction<1, excluded>(A, comm, parm);
+                if(allUniform[1] == nu && allUniform[2] == static_cast<unsigned short>(~nu))
+                    ret = _co->template construction<1, excluded>(std::move(Operator(*B, allUniform[0])), comm);
                 else if(N == 3 && allUniform[1] == 0 && allUniform[2] == static_cast<unsigned short>(~allUniform[3]))
-                    ret = _co->template construction<2, excluded>(A, comm, parm);
+                    ret = _co->template construction<2, excluded>(std::move(Operator(*B, allUniform[0])), comm);
                 else
-                    ret = _co->template construction<0, excluded>(A, comm, parm);
+                    ret = _co->template construction<0, excluded>(std::move(Operator(*B, allUniform[0])), comm);
                 construction = MPI_Wtime() - construction;
-                if(_co->getRank() == 0) {
-                    std::cout << "                 (" << parm[P] << " process" << (parm[P] > 1 ? "es" : "") << " -- topology = " << parm[TOPOLOGY] << " -- distribution = " << _co->getDistribution() << ")" << std::endl;
-                    std::cout << std::scientific << " --- coarse operator transferred and factorized (in " << construction << ")" << std::endl;
-                    std::cout << "                                     (criterion: " << (allUniform[1] == parm[NU] && allUniform[2] == static_cast<unsigned short>(~parm[NU]) ? parm[NU] : (N == 3 && allUniform[2] == static_cast<unsigned short>(~allUniform[3]) ? -_co->getLocal() : 0)) << ")" << std::endl;
+                if(_co->getRank() == 0 && opt.set("verbosity")) {
+                    std::stringstream ss;
+                    ss << std::setprecision(2) << construction;
+                    std::string line = " --- coarse operator transferred and factorized by " + to_string(static_cast<int>(opt["master_p"])) + " process" + (static_cast<int>(opt["master_p"]) == 1 ? "" : "es") + " (in " + ss.str() + "s)";
+                    std::cout << line << std::endl;
+                    std::cout << std::right << std::setw(line.size()) << "(criterion = " + to_string(allUniform[1] == nu && allUniform[2] == static_cast<unsigned short>(~nu) ? nu : (N == 3 && allUniform[2] == static_cast<unsigned short>(~allUniform[3]) ? -_co->getLocal() : 0)) + " -- topology = " + to_string(static_cast<int>(opt["master_topology"])) + " -- distribution = " + to_string(static_cast<int>(opt["master_distribution"])) + ")" << std::endl;
                 }
                 _uc = new K[_co->getSizeRHS()];
+            }
+            else {
+                delete _co;
+                _co = nullptr;
             }
             return ret;
         }
         /* Function: getVectors
          *  Returns a constant pointer to <Preconditioner::ev>. */
-        inline K** getVectors() const { return _ev; }
+        K** getVectors() const { return _ev; }
         /* Function: setVectors
          *  Sets the pointer <Preconditioner::ev>. */
-        inline void setVectors(K** const& ev) { _ev = ev; }
+        void setVectors(K** const& ev) { _ev = ev; }
         /* Function: getLocal
          *  Returns the value of <Coarse operator::local>. */
-        inline unsigned short getLocal() const { return _co ? _co->getLocal() : 0; }
+        unsigned short getLocal() const { return _co ? _co->getLocal() : 0; }
         /* Function: getAddrLocal
          *  Returns the address of <Coarse operator::local> or <i__0> if <Preconditioner::co> is not allocated. */
-        inline const int* getAddrLocal() const { return _co ? _co->getAddrLocal() : &i__0; }
+        const int* getAddrLocal() const { return _co ? _co->getAddrLocal() : &i__0; }
 };
 } // HPDDM
 #endif // _PRECONDITIONER_

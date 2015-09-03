@@ -1,11 +1,12 @@
 /*
    This file is part of HPDDM.
 
-   Author(s): Pierre Jolivet <jolivet@ann.jussieu.fr>
+   Author(s): Pierre Jolivet <pierre.jolivet@inf.ethz.ch>
               Frédéric Nataf <nataf@ann.jussieu.fr>
         Date: 2013-03-10
 
    Copyright (C) 2011-2014 Université de Grenoble
+                 2015      Eidgenössische Technische Hochschule Zürich
 
    HPDDM is free software: you can redistribute it and/or modify
    it under the terms of the GNU Lesser General Public License as published
@@ -47,10 +48,9 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          * SY           - Symmetric preconditioner, e.g. Additive Schwarz method.
          * GE           - Nonsymmetric preconditioner, e.g. Restricted Additive Schwarz method.
          * OS           - Optimized symmetric preconditioner, e.g. Optimized Schwarz method.
-         * OG           - Optimized nonsymmetric preconditioner, e.g. Optimized Restricted Additive Schwarz method.
-         * AD           - Additive two-level Schwarz method. */
+         * OG           - Optimized nonsymmetric preconditioner, e.g. Optimized Restricted Additive Schwarz method. */
         enum class Prcndtnr : char {
-            NO, SY, GE, OS, OG, AD
+            NO, SY, GE, OS, OG, AD, BA
         };
     private:
         /* Variable: d
@@ -59,54 +59,47 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         /* Variable: type
          *  Type of <Prcndtnr> used in <Schwarz::apply> and <Schwarz::deflation>. */
         Prcndtnr                         _type;
-#if HPDDM_GMV
-        std::vector<std::pair<std::vector<int>,
-                    std::vector<int>>>    _map;
-#endif
     public:
         Schwarz() : _d() { }
-        ~Schwarz() { }
+        ~Schwarz() { _d = nullptr; }
         /* Typedef: super
          *  Type of the immediate parent class <Preconditioner>. */
         typedef Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>, K> super;
         /* Function: initialize
          *  Sets <Schwarz::d>. */
         template<class Container = std::vector<int>>
-        inline void initialize(typename Wrapper<K>::ul_type* const& d) {
+        void initialize(typename Wrapper<K>::ul_type* const& d) {
             _d = d;
-#if HPDDM_GMV
-            _map.resize(Subdomain<K>::_map.size());
-            for(unsigned short i = 0; i < Subdomain<K>::_map.size(); ++i) {
-                _map[i].first.reserve(Subdomain<K>::_map[i].second.size());
-                _map[i].second.reserve(Subdomain<K>::_map[i].second.size());
-                for(unsigned int j = 0; j < Subdomain<K>::_map[i].second.size(); ++j) {
-                    const unsigned int k = Subdomain<K>::_map[i].second[j];
-                    if(std::abs(_d[k] - 1.0) < HPDDM_EPS)
-                        _map[i].first.emplace_back(k);
-                    else if(std::abs(_d[k]) < HPDDM_EPS)
-                        _map[i].second.emplace_back(k);
-                }
-            }
-#endif
-        }
-        /* Function: setType
-         *  Sets <Schwarz::type>. */
-        inline void setType(bool sym) {
-            _type = sym ? Prcndtnr::SY : Prcndtnr::GE;
-        }
-        inline void setType(Prcndtnr t) {
-            _type = t;
         }
         /* Function: callNumfact
          *  Factorizes <Subdomain::a> or another user-supplied matrix, useful for <Prcndtnr::OS> and <Prcndtnr::OG>. */
-        inline void callNumfact(MatrixCSR<K>* const& A = nullptr) {
+        void callNumfact(MatrixCSR<K>* const& A = nullptr) {
+            Option& opt = *Option::get();
             if(A != nullptr) {
-                if(_type == Prcndtnr::SY)
+                if(opt["schwarz_method"] == 1)
                     _type = Prcndtnr::OS;
                 else
                     _type = Prcndtnr::OG;
             }
-            super::_s.numfact(A ? A : Subdomain<K>::_a, _type == Prcndtnr::OS ? true : false);
+            else {
+                if(opt["schwarz_method"] == 3)
+                    _type = Prcndtnr::SY;
+                else if(opt["schwarz_method"] == 5)
+                    _type = Prcndtnr::NO;
+                else {
+                    _type = Prcndtnr::GE;
+                    opt["schwarz_method"] = 0;
+                }
+            }
+            super::_s.numfact(_type == Prcndtnr::OS || _type == Prcndtnr::OG ? A : Subdomain<K>::_a, _type == Prcndtnr::OS ? true : false);
+        }
+        void setMatrix(MatrixCSR<K>* const& a) {
+            bool fact = super::setMatrix(a);
+            if(fact) {
+                using type = alias<Solver<K>>;
+                super::_s.~type();
+                super::_s.numfact(a);
+            }
         }
         /* Function: multiplicityScaling
          *
@@ -114,7 +107,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *
          * Parameter:
          *    d              - Array of values. */
-        inline void multiplicityScaling(typename Wrapper<K>::ul_type* const d) const {
+        void multiplicityScaling(typename Wrapper<K>::ul_type* const d) const {
             for(unsigned short i = 0; i < Subdomain<K>::_map.size(); ++i) {
                 typename Wrapper<K>::ul_type* const recv = reinterpret_cast<typename Wrapper<K>::ul_type*>(Subdomain<K>::_rbuff[i]);
                 typename Wrapper<K>::ul_type* const send = reinterpret_cast<typename Wrapper<K>::ul_type*>(Subdomain<K>::_sbuff[i]);
@@ -139,7 +132,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         }
         /* Function: getScaling
          *  Returns a constant pointer to <Schwarz::d>. */
-        inline const typename Wrapper<K>::ul_type* getScaling() const { return _d; }
+        const typename Wrapper<K>::ul_type* getScaling() const { return _d; }
         /* Function: deflation
          *
          *  Computes a coarse correction.
@@ -152,25 +145,25 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *    out            - Output vector.
          *    fuse           - Number of fused reductions (optional). */
         template<bool excluded>
-        inline void deflation(const K* const in, K* const out, const unsigned short& fuse = 0) const {
+        void deflation(const K* const in, K* const out, const unsigned short& fuse = 0) const {
             if(fuse > 0) {
                 super::_co->reallocateRHS(const_cast<K*&>(super::_uc), fuse);
-                std::copy(out + Subdomain<K>::_dof, out + Subdomain<K>::_dof + fuse, super::_uc + super::getLocal());
+                std::copy_n(out + Subdomain<K>::_dof, fuse, super::_uc + super::getLocal());
             }
             if(excluded)
                 super::_co->template callSolver<excluded>(super::_uc, fuse);
             else {
-                Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in, out);                                                                                                                                                 // out = D in
+                Wrapper<K>::diag(Subdomain<K>::_dof, _d, in, out);                                                                                                                                                  // out = D in
                 Wrapper<K>::gemv(&(Wrapper<K>::transc), &(Subdomain<K>::_dof), super::getAddrLocal(), &(Wrapper<K>::d__1), *super::_ev, &(Subdomain<K>::_dof), out, &i__1, &(Wrapper<K>::d__0), super::_uc, &i__1); // _uc = _ev^T D in
                 super::_co->template callSolver<excluded>(super::_uc, fuse);                                                                                                                                        // _uc = E \ _ev^T D in
                 Wrapper<K>::gemv(&transa, &(Subdomain<K>::_dof), super::getAddrLocal(), &(Wrapper<K>::d__1), *super::_ev, &(Subdomain<K>::_dof), super::_uc, &i__1, &(Wrapper<K>::d__0), out, &i__1);               // out = _ev E \ _ev^T D in
                 if(_type != Prcndtnr::AD) {
-                    Wrapper<K>::diagv(Subdomain<K>::_dof, _d, out);
+                    Wrapper<K>::diag(Subdomain<K>::_dof, _d, out);
                     Subdomain<K>::exchange(out);
                 }
             }
             if(fuse > 0)
-                std::copy(super::_uc + super::getLocal(), super::_uc + super::getLocal() + fuse, out + Subdomain<K>::_dof);
+                std::copy_n(super::_uc + super::getLocal(), fuse, out + Subdomain<K>::_dof);
         }
 #if HPDDM_ICOLLECTIVE
         /* Function: Ideflation
@@ -186,24 +179,24 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *    rq             - MPI request to check completion of the MPI transfers.
          *    fuse           - Number of fused reductions (optional). */
         template<bool excluded>
-        inline void Ideflation(const K* const in, K* const out, MPI_Request* rq, const unsigned short& fuse = 0) const {
+        void Ideflation(const K* const in, K* const out, MPI_Request* rq, const unsigned short& fuse = 0) const {
             if(fuse > 0) {
                 super::_co->reallocateRHS(const_cast<K*&>(super::_uc), fuse);
-                std::copy(out + Subdomain<K>::_dof, out + Subdomain<K>::_dof + fuse, super::_uc + super::getLocal());
+                std::copy_n(out + Subdomain<K>::_dof, fuse, super::_uc + super::getLocal());
             }
             if(excluded)
                 super::_co->template IcallSolver<excluded>(super::_uc, rq, fuse);
             else {
-                Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in, out);
+                Wrapper<K>::diag(Subdomain<K>::_dof, _d, in, out);
                 Wrapper<K>::gemv(&(Wrapper<K>::transc), &(Subdomain<K>::_dof), super::getAddrLocal(), &(Wrapper<K>::d__1), *super::_ev, &(Subdomain<K>::_dof), out, &i__1, &(Wrapper<K>::d__0), super::_uc, &i__1);
                 super::_co->template IcallSolver<excluded>(super::_uc, rq, fuse);
             }
             if(fuse > 0)
-                std::copy(super::_uc + super::getLocal(), super::_uc + super::getLocal() + fuse, out + Subdomain<K>::_dof);
+                std::copy_n(super::_uc + super::getLocal(), fuse, out + Subdomain<K>::_dof);
         }
 #endif // HPDDM_ICOLLECTIVE
         template<bool excluded>
-        inline void deflation(K* const out, const unsigned short& fuse = 0) const {
+        void deflation(K* const out, const unsigned short& fuse = 0) const {
             deflation<excluded>(nullptr, out, fuse);
         }
         /* Function: buildTwo
@@ -213,14 +206,13 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          * Template Parameter:
          *    excluded       - Greater than 0 if the master processes are excluded from the domain decomposition, equal to 0 otherwise.
          *
-         * Parameters:
+         * Parameter:
          *    comm           - Global MPI communicator.
-         *    parm           - Vector of parameters.
          *
          * See also: <Bdd::buildTwo>, <Feti::buildTwo>. */
-        template<unsigned short excluded = 0, class Container>
-        inline std::pair<MPI_Request, const K*>* buildTwo(const MPI_Comm& comm, Container& parm) {
-            return super::template buildTwo<excluded, 2>(std::move(MatrixMultiplication<Schwarz<Solver, CoarseSolver, S, K>, K>(*this, parm[NU])), comm, parm);
+        template<unsigned short excluded = 0>
+        std::pair<MPI_Request, const K*>* buildTwo(const MPI_Comm& comm) {
+            return super::template buildTwo<excluded, MatrixMultiplication<Schwarz<Solver, CoarseSolver, S, K>, K>>(this, comm);
         }
         /* Function: apply
          *
@@ -234,39 +226,46 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *    out            - Output vector.
          *    fuse           - Number of fused reductions (optional). */
         template<bool excluded = false>
-        inline void apply(K* const in, K* const out, const unsigned short& fuse = 0) const {
-            if(!super::_co) {
+        void apply(const K* const in, K* const out, const unsigned short& mu = 1, K* work = nullptr, const unsigned short& fuse = 0) const {
+            const int correction = Option::get()->val("schwarz_coarse_correction", -1);
+            if(!super::_co || correction == -1) {
                 if(_type == Prcndtnr::NO)
-                    std::copy(in, in + Subdomain<K>::_dof, out);
+                    std::copy_n(in, mu * Subdomain<K>::_dof, out);
                 else if(_type == Prcndtnr::GE || _type == Prcndtnr::OG) {
                     if(!excluded) {
-                        super::_s.solve(in, out);
-                        Wrapper<K>::diagv(Subdomain<K>::_dof, _d, out);
-                        Subdomain<K>::exchange(out);                                                         // out = D A \ in
+                        super::_s.solve(in, out, mu);
+                        Wrapper<K>::diag(Subdomain<K>::_dof, mu, _d, out);
+                        Subdomain<K>::exchange(out, mu);                                                     // out = D A \ in
                     }
                 }
                 else {
                     if(!excluded) {
-                        if(_type == Prcndtnr::OS)
-                            Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in);
-                        super::_s.solve(in, out);
-                        if(_type == Prcndtnr::OS)
-                            Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in);
-                        Subdomain<K>::exchange(out);                                                         // out = A \ in
+                        if(_type == Prcndtnr::OS) {
+                            Wrapper<K>::diag(Subdomain<K>::_dof, mu, _d, in, out);
+                            super::_s.solve(out, mu);
+                            Wrapper<K>::diag(Subdomain<K>::_dof, mu, _d, out);
+                        }
+                        else
+                            super::_s.solve(in, out, mu);
+                        Subdomain<K>::exchange(out, mu);                                                     // out = A \ in
                     }
                 }
             }
             else {
-                if(_type == Prcndtnr::AD) {
+                if(!work)
+                    work = const_cast<K*>(in);
+                else
+                    std::copy_n(in, Subdomain<K>::_dof, work);
+                if(correction == 1) {
 #if HPDDM_ICOLLECTIVE
                     MPI_Request rq[2];
                     Ideflation<excluded>(in, out, rq, fuse);
                     if(!excluded) {
-                        super::_s.solve(in);                                                                                                                                                                  // out = A \ in
+                        super::_s.solve(work);                                                                                                                                                                // out = A \ in
                         MPI_Waitall(2, rq, MPI_STATUSES_IGNORE);
                         Wrapper<K>::gemv(&transa, &(Subdomain<K>::_dof), super::getAddrLocal(), &(Wrapper<K>::d__1), *super::_ev, &(Subdomain<K>::_dof), super::_uc, &i__1, &(Wrapper<K>::d__0), out, &i__1); // out = Z E \ Z^T in
-                        Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__1), in, &i__1, out, &i__1);
-                        Wrapper<K>::diagv(Subdomain<K>::_dof, _d, out);
+                        Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__1), work, &i__1, out, &i__1);
+                        Wrapper<K>::diag(Subdomain<K>::_dof, _d, out);
                         Subdomain<K>::exchange(out);                                                                                                                                                          // out = Z E \ Z^T in + A \ in
                     }
                     else
@@ -274,25 +273,32 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
 #else
                     deflation<excluded>(in, out, fuse);
                     if(!excluded) {
-                        super::_s.solve(in);
-                        Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__1), in, &i__1, out, &i__1);
-                        Wrapper<K>::diagv(Subdomain<K>::_dof, _d, out);
+                        super::_s.solve(work);
+                        Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__1), work, &i__1, out, &i__1);
+                        Wrapper<K>::diag(Subdomain<K>::_dof, _d, out);
                         Subdomain<K>::exchange(out);
                     }
 #endif // HPDDM_ICOLLECTIVE
                 }
                 else {
-                    deflation<excluded>(in, out, fuse);                                                      // out = Z E \ Z^T in
+                    deflation<excluded>(in, out, fuse);                                                        // out = Z E \ Z^T in
                     if(!excluded) {
-                        Wrapper<K>::template csrmv<'C'>(&transa, &(Subdomain<K>::_dof), &(Subdomain<K>::_dof), &(Wrapper<K>::d__2), Subdomain<K>::_a->_sym, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, out, &(Wrapper<K>::d__1), in);
-                        Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in);
-                        Subdomain<K>::exchange(in);                                                          //  in = (I - A Z E \ Z^T) in
+                        Wrapper<K>::template csrmv<'C'>(&transa, &(Subdomain<K>::_dof), &(Subdomain<K>::_dof), &(Wrapper<K>::d__2), Subdomain<K>::_a->_sym, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, out, &(Wrapper<K>::d__1), work);
+                        Wrapper<K>::diag(Subdomain<K>::_dof, _d, work);
+                        Subdomain<K>::exchange(work);                                                          //  in = (I - A Z E \ Z^T) in
                         if(_type == Prcndtnr::OS)
-                            Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in);
-                        super::_s.solve(in);
-                        Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in);
-                        Subdomain<K>::exchange(in);                                                          //  in = D A \ (I - A Z E \ Z^T) in
-                        Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__1), in, &i__1, out, &i__1); // out = D A \ (I - A Z E \ Z^T) in + Z E \ Z^T in
+                            Wrapper<K>::diag(Subdomain<K>::_dof, _d, work);
+                        super::_s.solve(work);
+                        Wrapper<K>::diag(Subdomain<K>::_dof, _d, work);
+                        Subdomain<K>::exchange(work);                                                          //  in = D A \ (I - A Z E \ Z^T) in
+                        if(correction == 2) {
+                            K* tmp = new K[Subdomain<K>::_dof];
+                            GMV(work, tmp, mu);
+                            deflation<excluded>(nullptr, tmp, fuse);
+                            Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__2), tmp, &i__1, work, &i__1);
+                            delete [] tmp;
+                        }
+                        Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__1), work, &i__1, out, &i__1); // out = D A \ (I - A Z E \ Z^T) in + Z E \ Z^T in
                     }
                 }
             }
@@ -306,7 +312,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *    B              - Output matrix used in GenEO.
          *
          * See also: <Schwarz::solveGEVP>. */
-        inline void scaleIntoOverlap(const MatrixCSR<K>* const& A, MatrixCSR<K>*& B) const {
+        void scaleIntoOverlap(const MatrixCSR<K>* const& A, MatrixCSR<K>*& B) const {
             std::set<unsigned int> intoOverlap;
             for(const pairNeighbor& neighbor : Subdomain<K>::_map)
                 for(unsigned int i : neighbor.second)
@@ -351,7 +357,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *    nu             - Number of eigenvectors requested.
          *    threshold      - Precision of the eigensolver. */
         template<template<class> class Eps>
-        inline void solveGEVP(MatrixCSR<K>* const& A, unsigned short& nu, const typename Wrapper<K>::ul_type& threshold, MatrixCSR<K>* const& B = nullptr, const MatrixCSR<K>* const& pattern = nullptr) {
+        void solveGEVP(MatrixCSR<K>* const& A, unsigned short& nu, const typename Wrapper<K>::ul_type& threshold, MatrixCSR<K>* const& B = nullptr, const MatrixCSR<K>* const& pattern = nullptr) {
             Eps<K> evp(threshold, Subdomain<K>::_dof, nu);
             bool free = pattern ? pattern->sameSparsity(A) : Subdomain<K>::_a->sameSparsity(A);
             MatrixCSR<K>* rhs = nullptr;
@@ -366,27 +372,14 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
                 A->_ia = nullptr;
                 A->_ja = nullptr;
             }
-            nu = evp.getNu();
+            (*Option::get())["geneo_nu"] = nu = evp.getNu();
+            const int n = Subdomain<K>::_dof;
+            std::for_each(super::_ev, super::_ev + nu, [&](K* const v) { std::replace_if(v, v + n, [](K x) { return std::abs(x) < 1.0 / (HPDDM_EPS * HPDDM_PEN); }, K()); });
         }
         template<bool sorted = true, bool scale = false>
-        inline void interaction(std::vector<const MatrixCSR<K>*>& blocks) const {
+        void interaction(std::vector<const MatrixCSR<K>*>& blocks) const {
             Subdomain<K>::template interaction<'C', sorted, scale>(blocks, _d);
         }
-#if HPDDM_GMV
-        inline void optimized_exchange(K* const out) const {
-            for(unsigned short i = 0; i < Subdomain<K>::_map.size(); ++i) {
-                MPI_Irecv(Subdomain<K>::_rbuff[i], _map[i].second.size(), Wrapper<K>::mpi_type(), Subdomain<K>::_map[i].first, 1, Subdomain<K>::_communicator, Subdomain<K>::_rq + i);
-                Wrapper<K>::gthr(_map[i].first.size(), out, Subdomain<K>::_sbuff[i], _map[i].first.data());
-                MPI_Isend(Subdomain<K>::_sbuff[i], _map[i].first.size(), Wrapper<K>::mpi_type(), Subdomain<K>::_map[i].first, 1, Subdomain<K>::_communicator, Subdomain<K>::_rq + Subdomain<K>::_map.size() + i);
-            }
-            for(unsigned short i = 0; i < Subdomain<K>::_map.size(); ++i) {
-                int index;
-                MPI_Waitany(Subdomain<K>::_map.size(), Subdomain<K>::_rq, &index, MPI_STATUS_IGNORE);
-                Wrapper<K>::sctr(_map[index].second.size(), Subdomain<K>::_rbuff[index], _map[index].second.data(), out);
-            }
-            MPI_Waitall(Subdomain<K>::_map.size(), Subdomain<K>::_rq + Subdomain<K>::_map.size(), MPI_STATUSES_IGNORE);
-        }
-#endif
         /* Function: GMV
          *
          *  Computes a global sparse matrix-vector product.
@@ -394,21 +387,19 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          * Parameters:
          *    in             - Input vector.
          *    out            - Output vector. */
-        inline void GMV(const K* const in, K* const out) const {
+        void GMV(const K* const in, K* const out, const unsigned short& mu = 1) const {
 #if 0
-            K* tmp = new K[Subdomain<K>::_dof];
-            Wrapper<K>::diagv(Subdomain<K>::_dof, _d, in, tmp);
-            Wrapper<K>::template csrmv<'C'>(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, tmp, out);
+            K* tmp = new K[mu * Subdomain<K>::_dof];
+            Wrapper<K>::diag(Subdomain<K>::_dof, mu, _d, in, tmp);
+            int dim = mu;
+            Wrapper<K>::template csrmm<'C'>(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), &dim, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, in, out);
             delete [] tmp;
-            Subdomain<K>::exchange(out);
+            Subdomain<K>::exchange(out, m);
 #else
-            Wrapper<K>::template csrmv<'C'>(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, in, out);
-#if HPDDM_GMV
-            optimized_exchange(out);
-#else
-            Wrapper<K>::diagv(Subdomain<K>::_dof, _d, out);
-            Subdomain<K>::exchange(out);
-#endif
+            int dim = mu;
+            Wrapper<K>::template csrmm<'C'>(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), &dim, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, in, out);
+            Wrapper<K>::diag(Subdomain<K>::_dof, mu, _d, out);
+            Subdomain<K>::exchange(out, mu);
 #endif
         }
         /* Function: computeError
@@ -421,31 +412,45 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          *    storage        - Array to store both values.
          *
          * See also: <Schur::computeError>. */
-        inline void computeError(const K* const x, const K* const f, typename Wrapper<K>::ul_type* const storage) const {
-            K* tmp = new K[Subdomain<K>::_dof];
-            GMV(x, tmp);
-            Wrapper<K>::axpy(&(Subdomain<K>::_dof), &(Wrapper<K>::d__2), f, &i__1, tmp, &i__1);
-            storage[0] = storage[1] = 0.0;
+        void computeError(const K* const x, const K* const f, typename Wrapper<K>::ul_type* const storage, const unsigned short& mu = 1) const {
+            int dim = mu * Subdomain<K>::_dof;
+            K* tmp = new K[dim];
+            GMV(x, tmp, mu);
+            Wrapper<K>::axpy(&dim, &(Wrapper<K>::d__2), f, &i__1, tmp, &i__1);
+            std::fill_n(storage, 2 * mu, 0.0);
             for(unsigned int i = 0; i < Subdomain<K>::_dof; ++i) {
-                if(std::abs(f[i]) > HPDDM_PEN * HPDDM_EPS) {
-                    storage[0] += _d[i] * std::norm(f[i]) / std::norm(HPDDM_PEN);
-                    storage[1] += _d[i] * std::norm(tmp[i]) / std::norm(HPDDM_PEN);
+                bool isBoundaryCond = true;
+                unsigned int stop;
+                if(!Subdomain<K>::_a->_sym)
+                    stop = std::distance(Subdomain<K>::_a->_ja, std::upper_bound(Subdomain<K>::_a->_ja + Subdomain<K>::_a->_ia[i], Subdomain<K>::_a->_ja + Subdomain<K>::_a->_ia[i + 1], i));
+                else
+                    stop = Subdomain<K>::_a->_ia[i + 1];
+                if(std::abs(Subdomain<K>::_a->_a[stop - 1]) > HPDDM_EPS * HPDDM_PEN)
+                    continue;
+                for(unsigned int j = Subdomain<K>::_a->_ia[i]; j < stop && isBoundaryCond; ++j) {
+                    if(i != Subdomain<K>::_a->_ja[j] && std::abs(Subdomain<K>::_a->_a[j]) > HPDDM_EPS)
+                        isBoundaryCond = false;
+                    else if(i == Subdomain<K>::_a->_ja[j] && std::abs(Subdomain<K>::_a->_a[j] - K(1.0)) > HPDDM_EPS)
+                        isBoundaryCond = false;
                 }
-                else {
-                    storage[0] += _d[i] * std::norm(f[i]);
-                    storage[1] += _d[i] * std::norm(tmp[i]);
+                for(unsigned short nu = 0; nu < mu; ++nu) {
+                    if(!isBoundaryCond)
+                        storage[2 * nu + 1] += _d[i] * std::norm(tmp[nu * Subdomain<K>::_dof + i]);
+                    if(std::abs(f[nu * Subdomain<K>::_dof + i]) > HPDDM_EPS * HPDDM_PEN)
+                        storage[2 * nu] += _d[i] * std::norm(f[nu * Subdomain<K>::_dof + i] / K(HPDDM_PEN));
+                    else
+                        storage[2 * nu] += _d[i] * std::norm(f[nu * Subdomain<K>::_dof + i]);
                 }
             }
             delete [] tmp;
-            MPI_Allreduce(MPI_IN_PLACE, storage, 2, Wrapper<typename Wrapper<K>::ul_type>::mpi_type(), MPI_SUM, Subdomain<K>::_communicator);
-            storage[0] = std::sqrt(storage[0]);
-            storage[1] = std::sqrt(storage[1]);
+            MPI_Allreduce(MPI_IN_PLACE, storage, 2 * mu, Wrapper<typename Wrapper<K>::ul_type>::mpi_type(), MPI_SUM, Subdomain<K>::_communicator);
+            std::for_each(storage, storage + 2 * mu, [](typename Wrapper<K>::ul_type& b) { b = std::sqrt(b); });
         }
         template<char N = 'C'>
-        inline void distributedNumbering(unsigned int* const in, unsigned int& first, unsigned int& last, unsigned int& global) const {
+        void distributedNumbering(unsigned int* const in, unsigned int& first, unsigned int& last, unsigned int& global) const {
             Subdomain<K>::template globalMapping<N>(in, in + Subdomain<K>::_dof, first, last, global, _d);
         }
-        inline bool distributedCSR(unsigned int* const num, unsigned int first, unsigned int last, int*& ia, int*& ja, K*& c) const {
+        bool distributedCSR(unsigned int* const num, unsigned int first, unsigned int last, int*& ia, int*& ja, K*& c) const {
             return Subdomain<K>::distributedCSR(num, first, last, ia, ja, c, Subdomain<K>::_a);
         }
 };
