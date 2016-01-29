@@ -36,6 +36,7 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
     const unsigned short it = opt["max_it"];
     underlying_type<K> tol = opt["tol"];
     const char verbosity = opt.val<char>("verbosity");
+    std::cout << std::scientific;
     if(std::abs(tol) < std::numeric_limits<underlying_type<K>>::epsilon()) {
         if(verbosity > 0)
             std::cout << "WARNING -- the tolerance of the iterative method was set to " << tol << " which is lower than the machine epsilon for type " << demangle(typeid(underlying_type<K>).name()) << ", forcing the tolerance to " << 2 * std::numeric_limits<underlying_type<K>>::epsilon() << std::endl;
@@ -43,7 +44,7 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
     }
     underlying_type<K>* dir;
     K* trash;
-    allocate(dir, trash, n, opt["variant"] == 2 ? 2 : (opt["gs"] != 2 ? 1 : 0), it);
+    allocate(dir, trash, n, opt["variant"] == 2 ? 2 : (opt["orthogonalization"] != 2 ? 1 : 0), it);
     bool alloc = A.setBuffer(1);
     K* z = trash + n;
     K* r = z + n;
@@ -51,12 +52,12 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
     const underlying_type<K>* const d = A.getScaling();
 
     A.template start<excluded>(b, x);
-    for(unsigned int i = 0; i < n; ++i)
-        if(std::abs(b[i]) > HPDDM_PEN * HPDDM_EPS)
-            depenalize(b[i], x[i]);
     A.GMV(x, z);
     std::copy_n(b, n, r);
     Blas<K>::axpy(&n, &(Wrapper<K>::d__2), z, &i__1, r, &i__1);
+    for(unsigned int i = 0; i < n; ++i)
+        if(std::abs(r[i]) > HPDDM_PEN * HPDDM_EPS)
+            r[i] = K();
 
     A.apply(r, p, 1, z);
 
@@ -79,7 +80,7 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
             }
         }
         A.GMV(p, z);
-        if(opt["gs"] != 2 && i > 1) {
+        if(opt["orthogonalization"] != 2 && i > 1) {
             Wrapper<K>::diag(n, d, z, trash);
             for(unsigned short k = 0; k < i - 1; ++k)
                 dir[1 + k] = -std::real(Blas<K>::dot(&n, trash, &i__1, p + (1 + k) * n, &i__1)) / dir[1 + it + k];
@@ -93,7 +94,7 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
         Wrapper<K>::diag(n, d, p, trash);
         dir[1] = std::real(Blas<K>::dot(&n, z, &i__1, trash, &i__1));
         MPI_Allreduce(MPI_IN_PLACE, dir, 2, Wrapper<K>::mpi_underlying_type(), MPI_SUM, comm);
-        if(opt["gs"] != 2 || opt["variant"] == 2) {
+        if(opt["orthogonalization"] != 2 || opt["variant"] == 2) {
             dir[it + i] = dir[1];
             std::copy_n(p, n, p + i * n);
             if(opt["variant"] == 2)
@@ -114,9 +115,9 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
         dir[0] = std::sqrt(dir[0]);
         if(verbosity > 0) {
             if(tol > 0)
-                std::cout << "CG: " << std::setw(3) << i << " " << std::scientific << dir[0] << " " << resInit << " " << dir[0] / resInit << " < " << tol << std::endl;
+                std::cout << "CG: " << std::setw(3) << i << " " << dir[0] << " " << resInit << " " << dir[0] / resInit << " < " << tol << std::endl;
             else
-                std::cout << "CG: " << std::setw(3) << i << " " << std::scientific << dir[0] << " < " << -tol << std::endl;
+                std::cout << "CG: " << std::setw(3) << i << " " << dir[0] << " < " << -tol << std::endl;
         }
         if((tol > 0.0 && dir[0] / resInit <= tol) || (tol < 0.0 && dir[0] <= -tol))
             break;
@@ -144,6 +145,7 @@ inline int IterativeMethod::PCG(const Operator& A, const K* const f, K* const x,
     const unsigned short it = opt["max_it"];
     underlying_type<K> tol = opt["tol"];
     const char verbosity = opt.val<char>("verbosity");
+    std::cout << std::scientific;
     if(std::abs(tol) < std::numeric_limits<underlying_type<K>>::epsilon()) {
         if(verbosity > 0)
             std::cout << "WARNING -- the tolerance of the iterative method was set to " << tol << " which is lower than the machine epsilon for type " << demangle(typeid(underlying_type<K>).name()) << ", forcing the tolerance to " << 2 * std::numeric_limits<underlying_type<K>>::epsilon() << std::endl;
@@ -228,7 +230,7 @@ inline int IterativeMethod::PCG(const Operator& A, const K* const f, K* const x,
         A.template computeDot<excluded>(&resRel, zCurr, zCurr, comm);
         resRel = std::sqrt(resRel);
         if(verbosity > 0)
-            std::cout << "PCG: " << std::setw(3) << i << " " << std::scientific << resRel << " " << resInit << " " << resRel / resInit << " < " << tol << std::endl;
+            std::cout << "PCG: " << std::setw(3) << i << " " << resRel << " " << resInit << " " << resRel / resInit << " < " << tol << std::endl;
         if(resRel / resInit <= tol)
             break;
         else

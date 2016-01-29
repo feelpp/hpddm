@@ -79,7 +79,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         void callNumfact(MatrixCSR<K>* const& A = nullptr) {
             Option& opt = *Option::get();
             if(A != nullptr) {
-                if(opt["schwarz_method"] == 1)
+                if(opt["schwarz_method"] == 2)
                     _type = Prcndtnr::OS;
                 else
                     _type = Prcndtnr::OG;
@@ -220,10 +220,11 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         }
         template<bool excluded = false>
         void start(const K* const b, K* const x, const unsigned short& mu = 1) const {
-            if(super::_co)
+            if(super::_co) {
                 super::start(mu);
-            if(Option::get()->val("schwarz_coarse_correction", -1) == 2)
-                deflation<excluded>(b, x, mu);
+                if(Option::get()->val("schwarz_coarse_correction", -1) == 2)
+                    deflation<excluded>(b, x, mu);
+            }
         }
         /* Function: apply
          *
@@ -388,7 +389,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
                 A->_ia = nullptr;
                 A->_ja = nullptr;
             }
-            (*Option::get())["geneo_nu"] = nu = evp.getNu();
+            (*Option::get())["geneo_nu"] = nu = evp._nu;
             const int n = Subdomain<K>::_dof;
             std::for_each(super::_ev, super::_ev + nu, [&](K* const v) { std::replace_if(v, v + n, [](K x) { return std::abs(x) < 1.0 / (HPDDM_EPS * HPDDM_PEN); }, K()); });
         }
