@@ -30,11 +30,9 @@ inline Option::Option(Singleton::construct_key<N>) {
     _app = nullptr;
     _opt = { { "tol",                           1.0e-8 },
              { "max_it",                        100 },
-             { "orthogonalization",             0 },
-#if HPDDM_SCHWARZ
-             { "krylov_method",                 0 },
              { "gmres_restart",                 50 },
              { "variant",                       0 },
+#if HPDDM_SCHWARZ
              { "schwarz_method",                0 },
 #endif
 #if HPDDM_FETI || HPDDM_BDD
@@ -76,6 +74,10 @@ inline Option::Option(Singleton::construct_key<N>) {
              { "master_boomeramg_num_sweeps",   1 },
              { "master_boomeramg_max_levels",   10 },
              { "master_boomeramg_interp_type",  0 },
+#elif defined(DMKL_PARDISO)
+             { "master_mkl_pardiso_iparm_2",    2 },
+             { "master_mkl_pardiso_iparm_10",   13 },
+             { "master_mkl_pardiso_iparm_11",   1 },
 #endif
 #if defined(DHYPRE) || defined(DPASTIX)
              { "master_distribution",           2 },
@@ -90,18 +92,21 @@ inline int Option::parse(std::vector<std::string>& args, bool display, const Con
         return 0;
     std::vector<std::tuple<std::string, std::string, std::function<bool(std::string&, const std::string&, bool)>>> option {
         std::forward_as_tuple("help", "Display available options.", Arg::anything),
+        std::forward_as_tuple("version", "Display informations about HPDDM.", Arg::anything),
         std::forward_as_tuple("tol=<1.0e-8>", "Relative decrease in residual norm.", Arg::numeric),
         std::forward_as_tuple("max_it=<100>", "Maximum number of iterations.", Arg::integer),
         std::forward_as_tuple("verbosity(=<integer>)", "Use verbose output.", Arg::anything),
         std::forward_as_tuple("reuse_preconditioner=(0|1)", "Do not construct a new preconditioner when solving subsequent systems with the same sparsity pattern.", Arg::argument),
-        std::forward_as_tuple("orthogonalization=(cgs|mgs|none)", "Classical (faster) or modified (more robust) Gram-Schmidt process, or no orthogonalization at all.", Arg::argument),
+        std::forward_as_tuple("local_operators_not_spd=(0|1)", "Assume local operators are general symmetric (instead of symmetric or Hermitian positive definite).", Arg::argument),
+        std::forward_as_tuple("orthogonalization=(cgs|mgs)", "Classical (faster) or Modified (more robust) Gram-Schmidt process.", Arg::argument),
+        std::forward_as_tuple("qr=(cholqr|cgs|mgs)", "Distributed QR factorizations computed with Cholesky QR, Classical or Modified Gram-Schmidt process.", Arg::argument),
         std::forward_as_tuple("dump_local_matri(ces|x_[[:digit:]]+)=<output_file>", "Save local operators to disk.", Arg::argument),
-#if HPDDM_SCHWARZ
-        std::forward_as_tuple("krylov_method=(gmres|bgmres|cg|gcrodr)", "(Block) Generalized Minimal Residual Method, Conjugate Gradient or Generalized Conjugate Residual Method With Inner Orthogonalization and Deflated Restarting.", Arg::argument),
+        std::forward_as_tuple("krylov_method=(gmres|bgmres|cg|gcrodr|bgcrodr)", "(Block) Generalized Minimal Residual Method, Conjugate Gradient or (Block) Generalized Conjugate Residual Method With Inner Orthogonalization and Deflated Restarting.", Arg::argument),
         std::forward_as_tuple("initial_deflation_tol=<val>", "Tolerance for deflating right-hand sides inside Block GMRES.", Arg::numeric),
         std::forward_as_tuple("gmres_restart=<50>", "Maximum size of the Krylov subspace.", Arg::integer),
         std::forward_as_tuple("gmres_recycle=<val>", "Number of harmonic Ritz vectors to compute.", Arg::integer),
         std::forward_as_tuple("variant=(left|right|flexible)", "Left or right or flexible preconditioning.", Arg::argument),
+#if HPDDM_SCHWARZ
         std::forward_as_tuple("", "", [](std::string&, const std::string&, bool) { std::cout << "\n Overlapping Schwarz methods options:"; return true; }),
         std::forward_as_tuple("schwarz_method=(ras|oras|soras|asm|osm|none)", "Symmetric or not, Optimized or Additive, Restricted or not.", Arg::argument),
         std::forward_as_tuple("schwarz_coarse_correction=(deflated|additive|balanced)", "Switch to a multilevel preconditioner.", Arg::argument),
@@ -114,9 +119,14 @@ inline int Option::parse(std::vector<std::string>& args, bool display, const Con
         std::forward_as_tuple("geneo_nu=<20>", "Local number of GenEO vectors to compute.", Arg::integer),
         std::forward_as_tuple("geneo_threshold=<eps>", "Local threshold for selecting GenEO vectors.", Arg::numeric),
         std::forward_as_tuple("geneo_eigensolver_tol=<1.0e-6>", "Requested tolerance of eigenpairs computed by ARPACK or LAPACK.", Arg::numeric),
-#ifdef MKL_PARDISOSUB
+#if defined(DMKL_PARDISO) || defined(MKL_PARDISOSUB)
         std::forward_as_tuple("", "", [](std::string&, const std::string&, bool) { std::cout << "\n MKL PARDISO-specific options:"; return true; }),
+#endif
+#ifdef MKL_PARDISOSUB
         std::forward_as_tuple("mkl_pardiso_iparm_(2|8|1[013]|2[147])=<val>", "Integer control parameters of MKL PARDISO for the subdomain solvers.", Arg::integer),
+#endif
+#ifdef DMKL_PARDISO
+        std::forward_as_tuple("master_mkl_pardiso_iparm_(2|1[013]|2[17])=<val>", "Integer control parameters of MKL PARDISO for the coarse operator solver.", Arg::integer),
 #endif
 #if defined(DMUMPS) || defined(MUMPSSUB)
         std::forward_as_tuple("", "", [](std::string&, const std::string&, bool) { std::cout << "\n MUMPS-specific options:"; return true; }),
@@ -137,6 +147,11 @@ inline int Option::parse(std::vector<std::string>& args, bool display, const Con
         std::forward_as_tuple("master_boomeramg_num_sweeps=<1>", "Number of sweeps.", Arg::integer),
         std::forward_as_tuple("master_boomeramg_max_levels=<10>", "Maximum number of multigrid levels.", Arg::integer),
         std::forward_as_tuple("master_boomeramg_interp_type=<0>", "Parallel interpolation operator.", Arg::integer),
+#endif
+#ifdef DISSECTIONSUB
+        std::forward_as_tuple("", "", [](std::string&, const std::string&, bool) { std::cout << "\n Dissection-specific options:"; return true; }),
+        std::forward_as_tuple("dissection_pivot_tol=<val>", "Tolerance for choosing when to pivot during numerical factorizations.", Arg::numeric),
+        std::forward_as_tuple("dissection_kkt_scaling=(0|1)", "Turn on KKT scaling instead of the default diagonal scaling.", Arg::argument),
 #endif
         std::forward_as_tuple("", "", Arg::anything),
 #if !defined(DSUITESPARSE)
@@ -252,6 +267,35 @@ inline int Option::parse(std::vector<std::string>& args, bool display, const Con
     }
     _opt.rehash(_opt.size());
     return 0;
+}
+void Option::version() const {
+    std::vector<std::string> v = {
+        " ┌",
+        " │ HPDDM compilation options: ",
+        " │  HPDDM version: " + std::string(HPDDM_STR(HPDDM_VERSION)),
+        " │  epsilon: " + std::string(HPDDM_STR(HPDDM_EPS)),
+        " │  penalization: " + std::string(HPDDM_STR(HPDDM_PEN)),
+        " │  OpenMP granularity: " + std::string(HPDDM_STR(HPDDM_GRANULARITY)),
+        " │  numbering: '" + std::string(1, HPDDM_NUMBERING) + "'",
+        " │  MKL support? " + std::string(bool(HPDDM_MKL) ? "true" : "false"),
+#ifdef INTEL_MKL_VERSION
+        " │  MKL version: " + to_string(INTEL_MKL_VERSION),
+#endif
+        " │  Schwarz module activated? " + std::string(bool(HPDDM_SCHWARZ) ? "true" : "false"),
+        " │  FETI module activated? " + std::string(bool(HPDDM_FETI) ? "true" : "false"),
+        " │  BDD module activated? " + std::string(bool(HPDDM_BDD) ? "true" : "false"),
+        " │  QR algorithm: " + std::string(HPDDM_STR(HPDDM_QR)),
+        " │  asynchronous collectives? " + std::string(bool(HPDDM_ICOLLECTIVE) ? "true" : "false"),
+        " │  optimized matrix-vector products? " + std::string(bool(HPDDM_GMV) ? "true" : "false"),
+        " │  subdomain solver: " + std::string(HPDDM_STR(SUBDOMAIN)),
+        " │  coarse operator solver: " + std::string(HPDDM_STR(COARSEOPERATOR)),
+        " │  eigensolver: " + std::string(HPDDM_STR(EIGENSOLVER)),
+        " └"
+    };
+    size_t max = 0;
+    for(const auto& x : v)
+        max = std::max(max, x.size());
+    output(v, max);
 }
 } // HPDDM
 #endif // _HPDDM_OPTION_IMPL_

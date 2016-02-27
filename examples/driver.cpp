@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
         std::forward_as_tuple("path=<./examples/data>", "Relative path to the different .txt files.", HPDDM::Option::Arg::argument)
     });
     unsigned short no = 0;
-    std::ifstream t(opt.prefix("path") + "/40" + to_string(no++) + ".txt");
+    std::ifstream t(opt.prefix("path") + "/40" + HPDDM::to_string(no++) + ".txt");
     if(!t.good()) {
         std::cerr << "Please specity a correct -path=<./examples/data>" << std::endl;
         return 1;
@@ -109,11 +109,7 @@ int main(int argc, char** argv) {
         if(mu > 1)
             for(unsigned short nu = 1; nu < mu; ++nu)
                 std::copy_n(rhs, Mat->_n, rhs + nu * Mat->_n);
-        switch(static_cast<int>(opt["krylov_method"])) {
-            case 3:  it += HPDDM::IterativeMethod::GCRODR(A, rhs, x, mu, MPI_COMM_SELF); break;
-            case 1:  it += HPDDM::IterativeMethod::BGMRES(A, rhs, x, mu, MPI_COMM_SELF); break;
-            default: it += HPDDM::IterativeMethod::GMRES(A, rhs, x, mu, MPI_COMM_SELF);
-        }
+        it += HPDDM::IterativeMethod::solve(A, rhs, x, mu, MPI_COMM_SELF);
         HPDDM::underlying_type<K>* nrmb = new HPDDM::underlying_type<K>[2 * mu];
         int n = Mat->_n;
         for(unsigned short nu = 0; nu < mu; ++nu)
@@ -142,16 +138,16 @@ int main(int argc, char** argv) {
         delete [] x;
         delete [] rhs;
         delete Mat;
-    } while(t.open(opt.prefix("path") + "/40" + to_string(no++) + ".txt"), t.good());
+    } while(t.open(opt.prefix("path") + "/40" + HPDDM::to_string(no++) + ".txt"), t.good());
     std::cout << "Total number of iterations: " << it << std::endl;
     MPI_Finalize();
-    if(status == 0 && opt["krylov_method"] == 3) {
+    if(status == 0 && opt.any_of("krylov_method", { 3, 4 })) {
         if(opt.app()["diagonal_scaling"] == 0)
-            status = !(it > 2347 && it < 2365);
+            status = !(it > 2346 && it < 2366);
         else if(opt["variant"] == 0)
-            status = !(it > 2053 && it < 2071);
+            status = !(it > 2052 && it < 2072);
         else if(opt["variant"] == 1)
-            status =!(it > 2061 && it < 2079);
+            status = !(it > 2055 && it < 2075);
     }
     return status;
 }

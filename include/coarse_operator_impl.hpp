@@ -247,10 +247,9 @@ inline std::pair<MPI_Request, const K*>* CoarseOperator<Solver, S, K>::construct
     if(Operator::_pattern == 'c')
         v.adjustConnectivity(_scatterComm);
     Solver<K>::initialize();
-    Option& opt = *Option::get();
     if(U == 2 && _local == 0)
         _offset = true;
-    switch(static_cast<int>(opt["master_topology"])) {
+    switch(Option::get()->val<unsigned short>("master_topology")) {
 #ifndef HPDDM_CONTIGUOUS
         case  1: return constructionMatrix<1, U, excluded>(v);
 #endif
@@ -661,7 +660,9 @@ inline std::pair<MPI_Request, const K*>* CoarseOperator<Solver, S, K>::construct
                 MPI_Irecv(C + offsetIdx[k - 1], S == 'S' ? _local * infoSplit[k][0] * _local + _local * (_local + 1) / 2 : (_local * infoSplit[k][0] + _local) * _local, Wrapper<K>::mpi_type(), k, 3, _scatterComm, rqRecv + idx + k - 1);
         }
 #endif
+#ifdef __OPENMP
 #pragma omp parallel for shared(I, J, infoWorld, infoSplit, rankRelative, offsetIdx, offsetPosition) schedule(dynamic, 64)
+#endif
         for(unsigned int k = 1; k < _sizeSplit; ++k) {
             if(U == 1 || infoSplit[k][2]) {
                 unsigned int tmp = U == 1 ? (rankRelative + k - (excluded == 2 ? (T == 1 ? p : 1 + rank) : 0)) * _local + (Solver<K>::_numbering == 'F') : offsetPosition[k];

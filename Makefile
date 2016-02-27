@@ -80,6 +80,10 @@ else
         LIBS += ${SUITESPARSE_LIBS}
     endif
 endif
+ifeq (${SUBSOLVER}, DISSECTION)
+    INCS += ${DISSECTION_INCS}
+    LIBS += ${DISSECTION_LIBS}
+endif
 
 LIBS += ${ARPACK_LIBS} ${SCALAPACK_LIBS}
 ifdef MKL_INCS
@@ -111,7 +115,15 @@ endif
 
 LIST_COMPILATION ?= cpp c python
 
+.PHONY: all cpp c python clean test test test_cpp test_c test_python test_bin/schwarz_cpp test_bin/schwarz_c test_examples/schwarz.py test_bin/schwarz_cpp_custom_op test_bin/driver force
+
 all: Makefile.inc ${LIST_COMPILATION}
+
+${TOP_DIR}/${TRASH_DIR}/compiler_flags_cpp: force
+	@echo "${CXXFLAGS} ${HPDDMFLAGS}" | cmp -s - $@ || echo "${CXXFLAGS} ${HPDDMFLAGS}" > $@
+
+${TOP_DIR}/${TRASH_DIR}/compiler_flags_c: force
+	@echo "${CCFLAGS} ${HPDDMFLAGS}" | cmp -s - $@ || echo "${CCFLAGS} ${HPDDMFLAGS}" > $@
 
 cpp: ${TOP_DIR}/${BIN_DIR}/schwarz_cpp
 c: ${TOP_DIR}/${BIN_DIR}/schwarz_c
@@ -130,15 +142,15 @@ clean:
 	rm -rf ${TOP_DIR}/${BIN_DIR} ${TOP_DIR}/${LIB_DIR} ${TOP_DIR}/${TRASH_DIR}
 	find ${TOP_DIR} \( -name "*.o" -o -name "*.${EXTENSION_LIB}" -o -name "*.pyc" -o -name "*.gcov" \) -exec rm -vf '{}' ';'
 
-${TOP_DIR}/${BIN_DIR}/%_cpp.o: examples/%.cpp ${TOP_DIR}/${TRASH_DIR}/%.d
+${TOP_DIR}/${BIN_DIR}/%_cpp.o: examples/%.cpp ${TOP_DIR}/${TRASH_DIR}/%.d ${TOP_DIR}/${TRASH_DIR}/compiler_flags_cpp
 	${MPICXX} ${DEPFLAGS} ${CXXFLAGS} ${HPDDMFLAGS} ${INCS} -c $< -o $@
 	${POSTCOMPILE}
 
-${TOP_DIR}/${BIN_DIR}/%_c.o: examples/%.c ${TOP_DIR}/${TRASH_DIR}/%.d
+${TOP_DIR}/${BIN_DIR}/%_c.o: examples/%.c ${TOP_DIR}/${TRASH_DIR}/%.d ${TOP_DIR}/${TRASH_DIR}/compiler_flags_c
 	${MPICC} ${DEPFLAGS} ${CFLAGS} ${HPDDMFLAGS} ${INCS} -c $< -o $@
 	${POSTCOMPILE}
 
-${TOP_DIR}/${BIN_DIR}/%.o: interface/%.cpp ${TOP_DIR}/${TRASH_DIR}/%.d
+${TOP_DIR}/${BIN_DIR}/%.o: interface/%.cpp ${TOP_DIR}/${TRASH_DIR}/%.d ${TOP_DIR}/${TRASH_DIR}/compiler_flags_cpp
 	${MPICXX} ${DEPFLAGS} ${CXXFLAGS} ${HPDDMFLAGS} ${INCS} -c $< -o $@
 	${POSTCOMPILE}
 
@@ -167,6 +179,7 @@ test_bin/schwarz_cpp test_bin/schwarz_c test_examples/schwarz.py:
 		examples/iterative.py -matrix_filename ${TRASH_DIR}/output.txt -hpddm_verbosity -hpddm_krylov_method=bgmres; \
 		examples/iterative.py -matrix_filename ${TRASH_DIR}/output.txt -hpddm_verbosity -generate_random_rhs 4; \
 		examples/iterative.py -matrix_filename ${TRASH_DIR}/output.txt -hpddm_verbosity 1 -hpddm_krylov_method=bgmres -generate_random_rhs=4 -hpddm_gmres_restart 5 -hpddm_initial_deflation_tol 1e-6; \
+		examples/iterative.py -matrix_filename ${TRASH_DIR}/output.txt -hpddm_verbosity 1 -hpddm_krylov_method=bgmres -generate_random_rhs=4 -hpddm_gmres_restart 5 -hpddm_initial_deflation_tol 1e-6 -hpddm_qr    cgs; \
 	fi
 	${MPIRUN} 1 $(subst test_,${SEP} ${TOP_DIR}/,$@) -symmetric_csr -hpddm_verbosity
 	${MPIRUN} 1 $(subst test_,${SEP} ${TOP_DIR}/,$@) -hpddm_verbosity -generate_random_rhs 8
@@ -180,6 +193,7 @@ test_bin/schwarz_cpp test_bin/schwarz_c test_examples/schwarz.py:
 	${MPIRUN} 4 $(subst test_,${SEP} ${TOP_DIR}/,$@) -hpddm_tol=1.0e-6 -hpddm_schwarz_coarse_correction deflated -hpddm_geneo_nu=10 -hpddm_verbosity=2 -Nx 50 -Ny 50 -symmetric_csr -hpddm_master_p 2 -distributed_sol -hpddm_orthogonalization   mgs
 	${MPIRUN} 4 $(subst test_,${SEP} ${TOP_DIR}/,$@) -hpddm_tol=1.0e-6 -hpddm_schwarz_coarse_correction deflated -hpddm_geneo_nu=10 -hpddm_verbosity=2 -nonuniform -Nx 50 -Ny 50 -symmetric_csr -hpddm_master_p 2
 	${MPIRUN} 4 $(subst test_,${SEP} ${TOP_DIR}/,$@) -hpddm_tol=1.0e-6 -hpddm_schwarz_coarse_correction deflated -hpddm_geneo_nu=10 -hpddm_verbosity=2 -nonuniform -Nx 50 -Ny 50 -symmetric_csr -hpddm_master_p 2 -generate_random_rhs 8 -hpddm_krylov_method=bgmres -hpddm_gmres_restart=10 -hpddm_initial_deflation_tol=1e-4
+	${MPIRUN} 4 $(subst test_,${SEP} ${TOP_DIR}/,$@) -hpddm_tol=1.0e-6 -hpddm_schwarz_coarse_correction deflated -hpddm_geneo_nu=10 -hpddm_verbosity=2 -nonuniform -Nx 50 -Ny 50 -symmetric_csr -hpddm_master_p 2 -generate_random_rhs 8 -hpddm_krylov_method=bgmres -hpddm_gmres_restart=10 -hpddm_initial_deflation_tol=1e-4 -hpddm_qr=mgs
 	${MPIRUN} 4 $(subst test_,${SEP} ${TOP_DIR}/,$@) -hpddm_tol=1.0e-6 -hpddm_schwarz_coarse_correction deflated -hpddm_geneo_nu=10 -hpddm_verbosity=2 -nonuniform -Nx 50 -Ny 50 -symmetric_csr --hpddm_dump_local_matrix_2 ${TRASH_DIR}/output
 	@if [ -f ${LIB_DIR}/libhpddm_python.${EXTENSION_LIB} ]; then \
 		examples/solver.py ${TRASH_DIR}/output_2_4.txt; \
@@ -201,8 +215,13 @@ test_bin/driver: ${TOP_DIR}/${BIN_DIR}/driver
 	for SCALING in 0 1; do \
 		for VARIANT in left right; do \
 			for MU in 1 3; do \
-				${MPIRUN} 1 ${SEP} ${TOP_DIR}/${BIN_DIR}/driver -path=${TOP_DIR}/${TRASH_DIR}/data -hpddm_max_it 1000 -hpddm_krylov_method gcrodr -hpddm_gmres_restart 40 -hpddm_gmres_recycle 20 -hpddm_tol 1e-10 -diagonal_scaling $${SCALING} -hpddm_variant $${VARIANT} -mu $${MU}; \
-			done \
+				CMD="${MPIRUN} 1 ${SEP} ${TOP_DIR}/${BIN_DIR}/driver -path=${TOP_DIR}/${TRASH_DIR}/data -hpddm_max_it 1000 -hpddm_krylov_method gcrodr -hpddm_gmres_restart 40 -hpddm_gmres_recycle 20 -hpddm_tol 1e-10 -diagonal_scaling $${SCALING} -hpddm_variant $${VARIANT} -mu $${MU}"; \
+				echo "$${CMD}"; \
+				$${CMD}; \
+			done; \
+			CMD="${MPIRUN} 1 ${SEP} ${TOP_DIR}/${BIN_DIR}/driver -path=${TOP_DIR}/${TRASH_DIR}/data -hpddm_max_it 1000 -hpddm_krylov_method bgcrodr -hpddm_gmres_restart 40 -hpddm_gmres_recycle 20 -hpddm_tol 1e-10 -diagonal_scaling $${SCALING} -hpddm_variant $${VARIANT}"; \
+			echo "$${CMD}"; \
+			$${CMD}; \
 		done \
 	done
 

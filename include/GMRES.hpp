@@ -66,12 +66,7 @@ inline int IterativeMethod::GMRES(const Operator& A, const K* const b, K* const 
             norm[nu] = std::real(Blas<K>::dot(&n, *v + nu * n, &i__1, *v + nu * n, &i__1));
     }
     else
-        for(unsigned short nu = 0; nu < mu; ++nu) {
-            norm[nu] = 0.0;
-            for(unsigned int i = 0; i < n; ++i)
-                if(std::abs(b[nu * n + i]) <= HPDDM_PEN * HPDDM_EPS)
-                    norm[nu] += std::norm(b[nu * n + i]);
-        }
+        localSquaredNorm(b, n, norm, mu);
 
     unsigned short j = 1;
     while(j <= it) {
@@ -80,11 +75,6 @@ inline int IterativeMethod::GMRES(const Operator& A, const K* const b, K* const 
         Blas<K>::axpby(mu * n, 1.0, b, 1, -1.0, variant == 'L' ? Ax : *v, 1);
         if(variant == 'L')
             A.template apply<excluded>(Ax, *v, mu);
-        if(!excluded)
-            for(unsigned short nu = 0; nu < mu; ++nu)
-                for(unsigned int j = 0; j < n; ++j)
-                    if(std::abs(v[0][nu * n + j]) > HPDDM_PEN * HPDDM_EPS)
-                        v[0][nu * n + j] = K();
         for(unsigned short nu = 0; nu < mu; ++nu)
             sn[nu] = std::real(Blas<K>::dot(&n, *v + nu * n, &i__1, *v + nu * n, &i__1));
         if(j == 1) {
@@ -115,7 +105,7 @@ inline int IterativeMethod::GMRES(const Operator& A, const K* const b, K* const 
                 if(!excluded)
                     A.GMV(variant == 'F' ? v[i + m + 1] : Ax, v[i + 1], mu);
             }
-            Arnoldi<excluded>(A, opt["orthogonalization"], m, H, v, s, sn, n, i++, mu, Ax, comm);
+            Arnoldi<excluded>(opt.val<char>("orthogonalization", 0), m, H, v, s, sn, n, i++, mu, comm);
             for(unsigned short nu = 0; nu < mu; ++nu) {
                 if(hasConverged[nu] == -m && ((tol > 0 && std::abs(s[i * mu + nu]) / norm[nu] <= tol) || (tol < 0 && std::abs(s[i * mu + nu]) <= -tol)))
                     hasConverged[nu] = i;
@@ -160,8 +150,10 @@ inline int IterativeMethod::GMRES(const Operator& A, const K* const b, K* const 
             break;
     }
     if(!excluded) {
-        const int rem = it % m;
-        std::for_each(hasConverged, hasConverged + mu, [&](short& d) { if(d < 0) d = rem > 0 ? rem : -d; });
+        if(j == it + 1) {
+            const int rem = it % m;
+            std::for_each(hasConverged, hasConverged + mu, [&](short& d) { if(d < 0) d = rem > 0 ? rem : -d; });
+        }
         updateSol(A, variant, n, x, H, s, v + (m + 1) * (variant == 'F'), hasConverged, mu, Ax);
     }
     if(verbosity > 0) {
@@ -198,7 +190,9 @@ inline int IterativeMethod::BGMRES(const Operator& A, const K* const b, K* const
     int ldh = mu * (m + 1);
     int info;
     int N = 2 * mu;
-    int lwork = mu * std::max(n, opt["orthogonalization"] != 1 ? ldh : mu);
+    char id = opt.val<char>("orthogonalization", 0);
+    int lwork = mu * std::max(n, id != 1 ? ldh : mu);
+    id += 4 * opt.val<char>("qr", 0);
     *H = new K[lwork + mu * ((m + 1) * ldh + n * (m * (1 + (variant == 'F')) + 1) + 2 * m) + (Wrapper<K>::is_complex ? (mu + 1) / 2 : mu)];
     *v = *H + m * mu * ldh;
     K* const s = *v + mu * n * (m * (1 + (variant == 'F')) + 1);
@@ -215,12 +209,13 @@ inline int IterativeMethod::BGMRES(const Operator& A, const K* const b, K* const
             norm[nu] = std::real(Blas<K>::dot(&n, *v + nu * n, &i__1, *v + nu * n, &i__1));
     }
     else
-        for(unsigned short nu = 0; nu < mu; ++nu) {
-            norm[nu] = 0.0;
-            for(unsigned int i = 0; i < n; ++i)
-                if(std::abs(b[nu * n + i]) <= HPDDM_PEN * HPDDM_EPS)
-                    norm[nu] += std::norm(b[nu * n + i]);
-        }
+        localSquaredNorm(b, n, norm, mu);
+    MPI_Allreduce(MPI_IN_PLACE, norm, mu, Wrapper<K>::mpi_underlying_type(), MPI_SUM, comm);
+    for(unsigned short nu = 0; nu < mu; ++nu) {
+        norm[nu] = std::sqrt(norm[nu]);
+        if(norm[nu] < HPDDM_EPS)
+            norm[nu] = 1.0;
+    }
 
     unsigned short j = 1;
     short dim = mu * m;
@@ -233,25 +228,7 @@ inline int IterativeMethod::BGMRES(const Operator& A, const K* const b, K* const
         Blas<K>::axpby(mu * n, 1.0, b, 1, -1.0, variant == 'L' ? Ax : *v, 1);
         if(variant == 'L')
             A.template apply<excluded>(Ax, *v, mu);
-        if(!excluded)
-            for(unsigned short nu = 0; nu < mu; ++nu)
-                for(unsigned int j = 0; j < n; ++j)
-                    if(std::abs(v[0][nu * n + j]) > HPDDM_PEN * HPDDM_EPS)
-                        v[0][nu * n + j] = K();
-        if(j == 1) {
-            for(unsigned short nu = 0; nu < mu; ++nu)
-                beta[nu] = std::real(Blas<K>::dot(&n, *v + nu * n, &i__1, *v + nu * n, &i__1));
-            MPI_Allreduce(MPI_IN_PLACE, beta, 2 * mu, Wrapper<K>::mpi_underlying_type(), MPI_SUM, comm);
-            for(unsigned short nu = 0; nu < mu; ++nu) {
-                norm[nu] = std::sqrt(norm[nu]);
-                if(norm[nu] < HPDDM_EPS)
-                    norm[nu] = 1.0;
-                beta[nu] = std::sqrt(beta[nu]);
-                if(tol > 0.0 && beta[nu] / norm[nu] < tol && norm[nu] > 1.0 / HPDDM_EPS)
-                    norm[nu] = 1.0;
-            }
-        }
-        VR<excluded>(n, mu, 1, *v, s, comm);
+        VR<excluded>(n, mu, 1, *v, s, mu, comm);
         if(!opt.set("initial_deflation_tol")) {
             Lapack<K>::potrf("U", &mu, s, &mu, &info);
             if(verbosity > 3) {
@@ -310,15 +287,15 @@ inline int IterativeMethod::BGMRES(const Operator& A, const K* const b, K* const
         while(i < m && j <= it) {
             if(variant == 'L') {
                 if(!excluded)
-                    A.GMV(v[i], Ax, mu);
-                A.template apply<excluded>(Ax, v[i + 1], mu);
+                    A.GMV(v[i], Ax, deflated);
+                A.template apply<excluded>(Ax, v[i + 1], deflated);
             }
             else {
-                A.template apply<excluded>(v[i], variant == 'F' ? v[i + m + 1] : Ax, mu, v[i + 1]);
+                A.template apply<excluded>(v[i], variant == 'F' ? v[i + m + 1] : Ax, deflated, v[i + 1]);
                 if(!excluded)
-                    A.GMV(variant == 'F' ? v[i + m + 1] : Ax, v[i + 1], mu);
+                    A.GMV(variant == 'F' ? v[i + m + 1] : Ax, v[i + 1], deflated);
             }
-            if(BlockArnoldi<excluded>(A, opt["orthogonalization"], m, H, v, tau, s, lwork, n, i++, deflated, Ax, comm)) {
+            if(BlockArnoldi<excluded>(id, m, H, v, tau, s, lwork, n, i++, deflated, Ax, comm)) {
                 dim = deflated * (i - 1);
                 i = j = 0;
                 break;
@@ -350,9 +327,9 @@ inline int IterativeMethod::BGMRES(const Operator& A, const K* const b, K* const
             else
                 ++j;
         }
+        if(opt.set("initial_deflation_tol"))
+            Lapack<K>::lapmt(&i__1, &n, &mu, x, &n, piv);
         if(j != it + 1 && i == m) {
-            if(opt.set("initial_deflation_tol"))
-                Lapack<K>::lapmt(&i__1, &n, &mu, x, &n, piv);
             if(!excluded)
                 updateSol(A, variant, n, x, H, s, v + (m + 1) * (variant == 'F'), &dim, mu, Ax, deflated);
             if(opt.set("initial_deflation_tol")) {
@@ -365,12 +342,12 @@ inline int IterativeMethod::BGMRES(const Operator& A, const K* const b, K* const
         else
             break;
     }
-    if(opt.set("initial_deflation_tol"))
-        Lapack<K>::lapmt(&i__1, &n, &mu, x, &n, piv);
     if(!excluded) {
-        const int rem = it % m;
-        if(rem != 0)
-            dim = deflated * rem;
+        if(j != 0 && j == it + 1) {
+            const int rem = it % m;
+            if(rem != 0)
+                dim = deflated * rem;
+        }
         updateSol(A, variant, n, x, H, s, v + (m + 1) * (variant == 'F'), &dim, mu, Ax, deflated);
     }
     if(opt.set("initial_deflation_tol"))

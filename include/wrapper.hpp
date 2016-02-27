@@ -173,7 +173,8 @@ constexpr K Wrapper<K>::d__2;
 
 template<class K>
 inline void Wrapper<K>::diag(const int& m, const underlying_type<K>* const d, K* const in, const int& n) {
-    diag(m, d, nullptr, in, n);
+    if(d != nullptr)
+        diag(m, d, nullptr, in, n);
 }
 
 #if HPDDM_MKL
@@ -281,12 +282,16 @@ inline void Wrapper<T>::omatcopy(const int n, const int m, const T* const a, con
 template<>                                                                                                   \
 inline void Wrapper<T>::diag(const int& m, const T* const d,                                                 \
                              const T* const in, T* const out, const int& n) {                                \
-    if(in)                                                                                                   \
-        for(int i = 0; i < n; ++i)                                                                           \
-            v ## C ## Mul(m, d, in + i * m, out + i * m);                                                    \
-    else                                                                                                     \
-        for(int i = 0; i < n; ++i)                                                                           \
-            v ## C ## Mul(m, d, out + i * m, out + i * m);                                                   \
+    if(d != nullptr) {                                                                                       \
+        if(in)                                                                                               \
+            for(int i = 0; i < n; ++i)                                                                       \
+                v ## C ## Mul(m, d, in + i * m, out + i * m);                                                \
+        else                                                                                                 \
+            for(int i = 0; i < n; ++i)                                                                       \
+                v ## C ## Mul(m, d, out + i * m, out + i * m);                                               \
+    }                                                                                                        \
+    else if(in)                                                                                              \
+        std::copy_n(in, n * m, out);                                                                         \
 }
 HPDDM_GENERATE_MKL(s, float)
 HPDDM_GENERATE_MKL(d, double)
@@ -333,7 +338,9 @@ inline void Wrapper<K>::csrmv(const char* const trans, const int* const m, const
         else {
             if(beta == &d__0)
                 std::fill_n(y, *m, K());
+#ifdef __OPENMP
 #pragma omp parallel for schedule(static, HPDDM_GRANULARITY)
+#endif
             for(int i = 0; i < *m; ++i) {
                 K res = K();
                 for(int l = ia[i] - (N == 'F'); l < ia[i + 1] - (N == 'F'); ++l)
@@ -401,10 +408,14 @@ inline void Wrapper<K>::csrmm(const char* const trans, const int* const m, const
             delete [] res;
         }
         else {
+#ifdef __OPENMP
 #pragma omp parallel private(res)
+#endif
             {
                 res = new K[*n];
+#ifdef __OPENMP
 #pragma omp for schedule(static, HPDDM_GRANULARITY)
+#endif
                 for(int i = 0; i < dimY; ++i) {
                     std::fill_n(res, *n, K());
                     for(int l = ia[i] - (N == 'F'); l < ia[i + 1] - (N == 'F'); ++l)
@@ -559,14 +570,18 @@ inline void Wrapper<K>::imatcopy(const int n, const int m, K* const ab, const in
 
 template<class K>
 inline void Wrapper<K>::diag(const int& m, const underlying_type<K>* const d, const K* const in, K* const out, const int& n) {
-    if(in)
-        for(int i = 0; i < n; ++i)
-            for(int j = 0; j < m; ++j)
-                out[j + i * m] = d[j] * in[j + i * m];
-    else
-        for(int i = 0; i < n; ++i)
-            for(int j = 0; j < m; ++j)
-                out[j + i * m] *= d[j];
+    if(d != nullptr) {
+        if(in)
+            for(int i = 0; i < n; ++i)
+                for(int j = 0; j < m; ++j)
+                    out[j + i * m] = d[j] * in[j + i * m];
+        else
+            for(int i = 0; i < n; ++i)
+                for(int j = 0; j < m; ++j)
+                    out[j + i * m] *= d[j];
+    }
+    else if(in)
+        std::copy_n(in, n * m, out);
 }
 template<class K>
 template<char N>

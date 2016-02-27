@@ -59,7 +59,7 @@ class Subdomain {
             if(_a) {
                 int rankWorld;
                 MPI_Comm_rank(_communicator, &rankWorld);
-                Option& opt = *Option::get();
+                const Option& opt = *Option::get();
                 std::string filename = opt.prefix("dump_local_matrices", true);
                 if(filename.size() == 0)
                     filename = opt.prefix("dump_local_matrix_" + to_string(rankWorld), true);
@@ -212,7 +212,7 @@ class Subdomain {
             return alloc;
         }
         void clearBuffer(const bool free = true) const {
-            if(free)
+            if(free && !_map.empty())
                 delete [] *_buff;
         }
         /* Function: initialize(dummy)
@@ -234,6 +234,28 @@ class Subdomain {
             MPI_Comm_compare(_communicator, comm, &result);
             return result != MPI_CONGRUENT && result != MPI_IDENT;
         }
+        K boundaryCond(const unsigned int i) const {
+            const int shift = _a->_ia[0];
+            unsigned int stop;
+            if(_a->_ia[i] != _a->_ia[i + 1]) {
+                if(!_a->_sym) {
+                    int* const bound = std::upper_bound(_a->_ja + _a->_ia[i] - shift, _a->_ja + _a->_ia[i + 1] - shift, i + shift);
+                    stop = std::distance(_a->_ja, bound);
+                }
+                else
+                    stop = _a->_ia[i + 1] - shift;
+                if((_a->_sym || stop < _a->_ia[i + 1] - shift) && _a->_ja[std::max(1U, stop) - 1] == i + shift && std::abs(_a->_a[stop - 1]) < HPDDM_EPS * HPDDM_PEN)
+                    for(unsigned int j = _a->_ia[i] - shift; j < stop; ++j) {
+                        if(i != _a->_ja[j] - shift && std::abs(_a->_a[j]) > HPDDM_EPS)
+                            return K();
+                        else if(i == _a->_ja[j] - shift && std::abs(_a->_a[j] - K(1.0)) > HPDDM_EPS)
+                            return K();
+                    }
+            }
+            else
+                return K();
+            return _a->_a[stop - 1];
+        }
         /* Function: getDof
          *  Returns the value of <Subdomain::dof>. */
         int getDof() const { return _dof; }
@@ -254,7 +276,7 @@ class Subdomain {
             if(_a) {
                 int rankWorld;
                 MPI_Comm_rank(_communicator, &rankWorld);
-                Option& opt = *Option::get();
+                const Option& opt = *Option::get();
                 std::string filename = opt.prefix("dump_local_matrices", true);
                 if(filename.size() == 0)
                     filename = opt.prefix("dump_local_matrix_" + to_string(rankWorld), true);
@@ -496,12 +518,12 @@ class Subdomain {
          *    d             - Local partition of unity (optional). */
         template<char N, class It>
         void globalMapping(It first, It last, unsigned int& start, unsigned int& end, unsigned int& global, const underlying_type<K>* const d = nullptr) const {
-            setBuffer(1);
             unsigned int between = 0;
             int rankWorld, sizeWorld;
             MPI_Comm_rank(_communicator, &rankWorld);
             MPI_Comm_size(_communicator, &sizeWorld);
             if(sizeWorld > 1) {
+                setBuffer(1);
                 for(unsigned short i = 0; i < _map.size() && _map[i].first < rankWorld; ++i)
                     ++between;
                 unsigned int size = std::ceil(2 * (std::distance(_buff[0], _buff[_map.size()]) + 1) * sizeof(unsigned int) / static_cast<float>(sizeof(K)));
@@ -596,6 +618,7 @@ class Subdomain {
                     delete [] rbuff;
                 global = end - (N == 'F');
                 MPI_Bcast(&global, 1, MPI_UNSIGNED, sizeWorld - 1, _communicator);
+                clearBuffer();
             }
             else {
                 std::iota(first, last, N == 'F');
@@ -603,7 +626,6 @@ class Subdomain {
                 end = std::distance(first, last);
                 global = end - start;
             }
-            clearBuffer();
         }
         /* Function: distributedCSR
          *  Assembles a distributed matrix that can be used by a backend such as PETSc.

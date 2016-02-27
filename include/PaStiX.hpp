@@ -78,6 +78,9 @@ HPDDM_GENERATE_PASTIX(z, std::complex<double>)
 #endif
 
 #ifdef DPASTIX
+#undef HPDDM_CHECK_SUBDOMAIN
+#define HPDDM_CHECK_COARSEOPERATOR
+#include "preprocessor_check.hpp"
 #define COARSEOPERATOR HPDDM::Pastix
 /* Class: Pastix
  *
@@ -153,7 +156,7 @@ class Pastix : public DMatrix {
             _dparm = new double[DPARM_SIZE];
 
             pstx<K>::initParam(_iparm, _dparm);
-            Option& opt = *Option::get();
+            const Option& opt = *Option::get();
             int val = opt.val<int>("verbosity");
             if(val < 2)
                 _iparm[IPARM_VERBOSE]         = API_VERBOSE_NOT;
@@ -249,6 +252,9 @@ class Pastix : public DMatrix {
 #endif // DPASTIX
 
 #ifdef PASTIXSUB
+#undef HPDDM_CHECK_COARSEOPERATOR
+#define HPDDM_CHECK_SUBDOMAIN
+#include "preprocessor_check.hpp"
 #define SUBDOMAIN HPDDM::PastixSub
 template<class K>
 class PastixSub {
@@ -308,7 +314,7 @@ class PastixSub {
                 }
             }
             if(A->_sym) {
-                _iparm[IPARM_FACTORIZATION]       = Wrapper<K>::is_complex || detection ? API_FACT_LDLT : API_FACT_LLT;
+                _iparm[IPARM_FACTORIZATION]       = (Option::get()->val<char>("local_operators_not_spd", 0) || detection) ? API_FACT_LDLT : API_FACT_LLT;
                 Wrapper<K>::template csrcsc<N, 'F'>(&_ncol, A->_a, A->_ja, A->_ia, _values, _rows, _colptr);
             }
             else {

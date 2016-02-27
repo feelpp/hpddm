@@ -67,7 +67,7 @@ char numbering = HPDDM_NUMBERING;
 unsigned short scalar = std::is_same<K, float>::value ? 0 : std::is_same<K, double>::value ? 1 : std::is_same<K, std::complex<float>>::value ? 2 : 3;
 
 void* const optionGet() {
-    return &*HPDDM::Option::get();
+    return HPDDM::Option::get().get();
 }
 int optionParse(void* option, char* args, bool display) {
     HPDDM::Option& opt = *reinterpret_cast<HPDDM::Option*>(option);
@@ -236,19 +236,10 @@ void schwarzDestroy(void** schwarz) {
     }
 }
 
-int CG(void* A, HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, MPI_Comm* comm) {
-    return HPDDM::IterativeMethod::CG(*(reinterpret_cast<HPDDM::Schwarz<SUBDOMAIN, COARSEOPERATOR, symCoarse, K>*>(A)), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), *comm);
+int solve(void* A, HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, int mu, MPI_Comm* comm) {
+    return HPDDM::IterativeMethod::solve(*(reinterpret_cast<HPDDM::Schwarz<SUBDOMAIN, COARSEOPERATOR, symCoarse, K>*>(A)), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), mu, *comm);
 }
-int GMRES(void* A, HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, int mu, MPI_Comm* comm) {
-    return HPDDM::IterativeMethod::GMRES(*(reinterpret_cast<HPDDM::Schwarz<SUBDOMAIN, COARSEOPERATOR, symCoarse, K>*>(A)), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), mu, *comm);
-}
-int CustomOperatorGMRES(void* Mat, void (*precond)(const HPDDM::pod_type<K>*, HPDDM::pod_type<K>*, int, int), HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, int n, int mu) {
-    return HPDDM::IterativeMethod::GMRES(CustomOperator(reinterpret_cast<HPDDM::MatrixCSR<K>*>(Mat), precond), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), mu, MPI_COMM_SELF);
-}
-int BGMRES(void* A, HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, int mu, MPI_Comm* comm) {
-    return HPDDM::IterativeMethod::BGMRES(*(reinterpret_cast<HPDDM::Schwarz<SUBDOMAIN, COARSEOPERATOR, symCoarse, K>*>(A)), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), mu, *comm);
-}
-int CustomOperatorBGMRES(void* Mat, void (*precond)(const HPDDM::pod_type<K>*, HPDDM::pod_type<K>*, int, int), HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, int n, int mu) {
-    return HPDDM::IterativeMethod::BGMRES(CustomOperator(reinterpret_cast<HPDDM::MatrixCSR<K>*>(Mat), precond), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), mu, MPI_COMM_SELF);
+int CustomOperatorSolve(void* Mat, void (*precond)(const HPDDM::pod_type<K>*, HPDDM::pod_type<K>*, int, int), HPDDM::pod_type<K>* f, HPDDM::pod_type<K>* sol, int n, int mu) {
+    return HPDDM::IterativeMethod::solve(CustomOperator(reinterpret_cast<HPDDM::MatrixCSR<K>*>(Mat), precond), reinterpret_cast<K*>(f), reinterpret_cast<K*>(sol), mu, MPI_COMM_SELF);
 }
 }

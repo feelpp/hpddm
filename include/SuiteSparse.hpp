@@ -84,7 +84,11 @@ struct stsprs<std::complex<double>> {
     }
 };
 
+
 #ifdef DSUITESPARSE
+#undef HPDDM_CHECK_SUBDOMAIN
+#define HPDDM_CHECK_COARSEOPERATOR
+#include "preprocessor_check.hpp"
 #define COARSEOPERATOR HPDDM::SuiteSparse
 /* Class: SuiteSparse
  *
@@ -234,6 +238,9 @@ class SuiteSparse : public DMatrix {
 #endif // DSUITESPARSE
 
 #ifdef SUITESPARSESUB
+#undef HPDDM_CHECK_COARSEOPERATOR
+#define HPDDM_CHECK_SUBDOMAIN
+#include "preprocessor_check.hpp"
 #define SUBDOMAIN HPDDM::SuiteSparseSub
 template<class K>
 class SuiteSparseSub {
@@ -276,7 +283,7 @@ class SuiteSparseSub {
         template<char N = HPDDM_NUMBERING>
         void numfact(MatrixCSR<K>* const& A, bool detection = false) {
             static_assert(N == 'C', "Unsupported numbering");
-            if(!Wrapper<K>::is_complex && A->_sym) {
+            if(!Option::get()->val<char>("local_operators_not_spd", 0) && A->_sym) {
                 if(!_c) {
                     _c = new cholmod_common;
                     cholmod_start(_c);
@@ -356,7 +363,9 @@ class SuiteSparseSub {
                     a  = new K[nnz];
                     nnz = 0;
                     unsigned int i;
+#ifdef __OPENMP
 #pragma omp parallel for schedule(static, HPDDM_GRANULARITY)
+#endif
                     for(i = 0; i < A->_n; ++i)
                         std::sort(v[i].begin(), v[i].end(), [](const std::pair<unsigned int, K>& lhs, const std::pair<unsigned int, K>& rhs) { return lhs.first < rhs.first; });
                     ia[0] = 0;

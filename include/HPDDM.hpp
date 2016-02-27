@@ -42,7 +42,7 @@
  *    HPDDM_QR            - If not set to zero, pseudo-inverses of Schur complements are computed using dense QR decompositions (with pivoting if set to one, without pivoting otherwise).
  *    HPDDM_ICOLLECTIVE   - If possible, use nonblocking MPI collective operations.
  *    HPDDM_GMV           - For overlapping Schwarz methods, this can be used to reduce the volume of communication for computing global matrix-vector products. */
-#define HPDDM_VERSION         000201
+#define HPDDM_VERSION         000300
 #define HPDDM_EPS             1.0e-12
 #define HPDDM_PEN             1.0e+30
 #define HPDDM_GRANULARITY     50000
@@ -181,7 +181,8 @@ template<class T>
 inline T sto(std::string s, typename std::enable_if<std::is_same<T, double>::value>::type* = nullptr) {
     return std::stod(s);
 }
-#  define to_string(x) std::to_string(x)
+template<class T>
+inline std::string to_string(const T& x) { return std::to_string(x); }
 # endif // __MINGW32__
 template<class T>
 using alias = T;
@@ -198,6 +199,16 @@ template<class T>
 using underlying_type = typename underlying_type_spec<T>::type;
 template<class T>
 using pod_type = typename std::conditional<std::is_same<underlying_type<T>, T>::value, T, void*>::type;
+
+template<class>
+struct is_substructuring_method : std::false_type { };
+
+template<class T>
+inline void hash_range(std::size_t& seed, T begin, T end) {
+    std::hash<typename std::remove_const<typename std::remove_reference<decltype(*begin)>::type>::type> hasher;
+    while(begin != end)
+        seed ^= hasher(*begin++) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
 } // HPDDM
 # if (!defined(__clang__) && defined(__GNUC__)) || (defined(__INTEL_COMPILER) && defined(__GNUC__))
 #  if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) < 40900
@@ -254,6 +265,9 @@ using pod_type = typename std::conditional<std::is_same<underlying_type<T>, T>::
 #  if defined(SUITESPARSESUB) || defined(DSUITESPARSE)
 #   include "SuiteSparse.hpp"
 #  endif
+#  ifdef DISSECTIONSUB
+#   include "Dissection.hpp"
+#  endif
 #  if !defined(SUBDOMAIN) || !defined(COARSEOPERATOR)
 #   undef HPDDM_SCHWARZ
 #   undef HPDDM_FETI
@@ -293,8 +307,8 @@ using HpBdd = HPDDM::Bdd<SUBDOMAIN, COARSEOPERATOR, S, K>;
 #  include "GMRES.hpp"
 #  include "GCRODR.hpp"
 #  include "CG.hpp"
+#  include "option_impl.hpp"
 # endif // HPDDM_MINIMAL
-# include "option_impl.hpp"
 #else
 # include "BLAS.hpp"
 # include "LAPACK.hpp"

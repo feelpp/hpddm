@@ -37,10 +37,14 @@ template<class K>
 struct prds {
     static constexpr int SPD = !Wrapper<K>::is_complex ? 2 : 4;
     static constexpr int SYM = !Wrapper<K>::is_complex ? -2 : 6;
-    static constexpr int UNS = !Wrapper<K>::is_complex ? 1 : 3;
+    static constexpr int SSY = !Wrapper<K>::is_complex ? 1 : 3;
+    static constexpr int UNS = !Wrapper<K>::is_complex ? 11 : 13;
 };
 
 #ifdef DMKL_PARDISO
+#undef HPDDM_CHECK_SUBDOMAIN
+#define HPDDM_CHECK_COARSEOPERATOR
+#include "preprocessor_check.hpp"
 #define COARSEOPERATOR HPDDM::MklPardiso
 /* Class: MKL Pardiso
  *
@@ -111,23 +115,22 @@ class MklPardiso : public DMatrix {
             _I = I;
             _J = J;
             _C = C;
-            Option& opt = *Option::get();
+            const Option& opt = *Option::get();
             if(S == 'S')
                 _mtype = opt.val<unsigned short>("master_not_spd", 0) ? prds<K>::SYM : prds<K>::SPD;
             else
-                _mtype = prds<K>::UNS;
+                _mtype = prds<K>::SSY;
             int phase, error;
             K ddum;
             std::fill_n(_iparm, 64, 0);
+            for(unsigned short i : { 1, 9, 10, 12, 20, 26 }) {
+                int val = opt.val<int>("master_mkl_pardiso_iparm_" + to_string(i + 1));
+                if(val != std::numeric_limits<int>::lowest())
+                    _iparm[i] = val;
+
+            }
             _iparm[0] = 1;
-#ifdef _OPENMP
-            _iparm[1] = omp_get_num_threads() > 1 ? 3 : 2;
-#else
-            _iparm[1] = 2;
-#endif
             _iparm[5] = 1;
-            _iparm[9] = 13;
-            _iparm[10] = 1;
             _iparm[27] = std::is_same<double, underlying_type<K>>::value ? 0 : 1;
             _iparm[34] = (_numbering == 'C');
             _iparm[39] = 2;
@@ -153,7 +156,6 @@ class MklPardiso : public DMatrix {
             int error;
             int phase = 33;
             int nrhs = n;
-            K ddum;
             CLUSTER_SPARSE_SOLVER(_pt, const_cast<int*>(&i__1), const_cast<int*>(&i__1), &_mtype, &phase, &(DMatrix::_n), _C, _I, _J, const_cast<int*>(&i__1), &nrhs, _iparm, const_cast<int*>(&i__0), rhs, _w, const_cast<int*>(&_comm), &error);
         }
         void initialize() {
@@ -165,6 +167,9 @@ class MklPardiso : public DMatrix {
 #endif // DMKL_PARDISO
 
 #ifdef MKL_PARDISOSUB
+#undef HPDDM_CHECK_COARSEOPERATOR
+#define HPDDM_CHECK_SUBDOMAIN
+#include "preprocessor_check.hpp"
 #define SUBDOMAIN HPDDM::MklPardisoSub
 template<class K>
 class MklPardisoSub {
@@ -204,11 +209,11 @@ class MklPardisoSub {
             int* perm = nullptr;
             int phase, error;
             K ddum;
+            const Option& opt = *Option::get();
             if(!_w) {
                 _n = A->_n;
                 std::fill_n(_iparm, 64, 0);
                 _iparm[0] = 1;
-                Option& opt = *Option::get();
                 for(unsigned short i : { 1, 7, 9, 10, 12, 20, 23, 26 }) {
                     int val = opt.val<int>("mkl_pardiso_iparm_" + to_string(i + 1));
                     if(val != std::numeric_limits<int>::lowest())
@@ -223,8 +228,24 @@ class MklPardisoSub {
                     _J = new int[A->_nnz];
                     _C = new K[A->_nnz];
                 }
-                else
-                    _mtype = prds<K>::UNS;
+                else {
+                    _mtype = prds<K>::SSY;
+                    for(unsigned int i = 0; i < _n && _mtype != prds<K>::UNS; ++i) {
+                        bool diagonalCoefficient = false;
+                        for(unsigned int j = A->_ia[i] - (N == 'F'); j < A->_ia[i + 1] - (N == 'F'); ++j) {
+                            if(A->_ja[j] != (i + (N == 'F'))) {
+                                if(!std::binary_search(A->_ja + A->_ia[A->_ja[j] - (N == 'F')] - (N == 'F'), A->_ja + A->_ia[A->_ja[j] - (N == 'F') + 1] - (N == 'F'), i + (N == 'F'))) {
+                                    _mtype = prds<K>::UNS;
+                                    break;
+                                }
+                            }
+                            else
+                                diagonalCoefficient = true;
+                        }
+                        if(!diagonalCoefficient)
+                            _mtype = prds<K>::UNS;
+                    }
+                }
                 if(schur != nullptr) {
                     _iparm[35] = 2;
                     perm = new int[_n];
@@ -240,7 +261,7 @@ class MklPardisoSub {
                 phase = 22;
             }
             if(A->_sym) {
-                _mtype = Wrapper<K>::is_complex || detection ? prds<K>::SYM : prds<K>::SPD;
+                _mtype = (opt.val<char>("local_operators_not_spd", 0) || detection) ? prds<K>::SYM : prds<K>::SPD;
                 Wrapper<K>::template csrcsc<N, N>(&_n, A->_a, A->_ja, A->_ia, _C, _J, _I);
             }
             else {

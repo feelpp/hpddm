@@ -61,8 +61,9 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         /* Variable: type
          *  Type of <Prcndtnr> used in <Schwarz::apply> and <Schwarz::deflation>. */
         Prcndtnr               _type;
+        std::size_t            _hash;
     public:
-        Schwarz() : _d() { }
+        Schwarz() : _d(), _hash() { }
         ~Schwarz() { _d = nullptr; }
         /* Typedef: super
          *  Type of the immediate parent class <Preconditioner>. */
@@ -83,6 +84,11 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
                     _type = Prcndtnr::OS;
                 else
                     _type = Prcndtnr::OG;
+                std::size_t hash = A->hashIndices();
+                if(_hash != hash) {
+                    _hash = hash;
+                    super::destroySolver();
+                }
             }
             else {
                 if(opt["schwarz_method"] == 3)
@@ -96,19 +102,15 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
             }
             unsigned short reuse = opt.val<unsigned short>("reuse_preconditioner", 0);
             if(reuse <= 1)
-                super::_s.template numfact<N>(_type == Prcndtnr::OS || _type == Prcndtnr::OG ? A : Subdomain<K>::_a, _type == Prcndtnr::OS ? true : false);
+                super::_s.template numfact<N>(_type == Prcndtnr::OS || _type == Prcndtnr::OG ? A : Subdomain<K>::_a);
             if(reuse >= 1)
                 opt["reuse_preconditioner"] += 1;
         }
         void setMatrix(MatrixCSR<K>* const& a) {
             bool fact = super::setMatrix(a) && _type != Prcndtnr::OS && _type != Prcndtnr::OG;
             if(fact) {
-                using type = alias<Solver<K>>;
-                super::_s.~type();
+                super::destroySolver();
                 super::_s.numfact(a);
-                Option& opt = *Option::get();
-                if(opt.val<unsigned short>("reuse_preconditioner", 0) >= 1)
-                    opt["reuse_preconditioner"] = 1;
             }
         }
         /* Function: multiplicityScaling
@@ -220,9 +222,17 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         }
         template<bool excluded = false>
         void start(const K* const b, K* const x, const unsigned short& mu = 1) const {
+            for(unsigned int i = 0; i < Subdomain<K>::_dof; ++i) {
+                K boundary = Subdomain<K>::boundaryCond(i);
+                if(std::abs(boundary) > HPDDM_EPS) {
+                    for(unsigned short nu = 0; nu < mu; ++nu)
+                        x[nu * Subdomain<K>::_dof + i] = b[nu * Subdomain<K>::_dof + i] / boundary;
+                }
+            }
+            scaledExchange(x, mu);
             if(super::_co) {
                 super::start(mu);
-                if(Option::get()->val("schwarz_coarse_correction", -1) == 2)
+                if(Option::get()->val<unsigned short>("schwarz_coarse_correction") == 2)
                     deflation<excluded>(b, x, mu);
             }
         }
@@ -333,7 +343,9 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
                         intoOverlap.insert(i);
             std::vector<std::vector<std::pair<unsigned int, K>>> tmp(intoOverlap.size());
             unsigned int k, iPrev = 0;
+#ifdef __OPENMP
 #pragma omp parallel for schedule(static, HPDDM_GRANULARITY) reduction(+ : iPrev)
+#endif
             for(k = 0; k < intoOverlap.size(); ++k) {
                 auto it = std::next(intoOverlap.cbegin(), k);
                 tmp[k].reserve(A->_ia[*it + 1] - A->_ia[*it]);
@@ -404,7 +416,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
          * Parameters:
          *    in             - Input vector.
          *    out            - Output vector. */
-        void GMV(const K* const in, K* const out, const int& mu = 1) const {
+        void GMV(const K* const in, K* const out, const int& mu = 1, MatrixCSR<K>* const& A = nullptr) const {
 #if 0
             K* tmp = new K[mu * Subdomain<K>::_dof];
             Wrapper<K>::diag(Subdomain<K>::_dof, _d, in, tmp, mu);
@@ -417,8 +429,12 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
             delete [] tmp;
             Subdomain<K>::exchange(out, mu);
 #else
-            if(HPDDM_NUMBERING == Wrapper<K>::I)
-                Wrapper<K>::csrmm(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), &mu, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, in, out);
+            if(HPDDM_NUMBERING == Wrapper<K>::I || A != nullptr) {
+                if(A != nullptr)
+                    Wrapper<K>::csrmm(A->_sym, &(A->_n), &mu, A->_a, A->_ia, A->_ja, in, out);
+                else
+                    Wrapper<K>::csrmm(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), &mu, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, in, out);
+            }
             else if(Subdomain<K>::_a->_ia[Subdomain<K>::_dof] == Subdomain<K>::_a->_nnz)
                 Wrapper<K>::template csrmm<'C'>(Subdomain<K>::_a->_sym, &(Subdomain<K>::_dof), &mu, Subdomain<K>::_a->_a, Subdomain<K>::_a->_ia, Subdomain<K>::_a->_ja, in, out);
             else
@@ -445,25 +461,12 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
             Blas<K>::axpy(&dim, &(Wrapper<K>::d__2), f, &i__1, tmp, &i__1);
             std::fill_n(storage, 2 * mu, 0.0);
             for(unsigned int i = 0; i < Subdomain<K>::_dof; ++i) {
-                bool isBoundaryCond = true;
-                unsigned int stop;
-                if(!Subdomain<K>::_a->_sym)
-                    stop = std::distance(Subdomain<K>::_a->_ja, std::upper_bound(Subdomain<K>::_a->_ja + Subdomain<K>::_a->_ia[i], Subdomain<K>::_a->_ja + Subdomain<K>::_a->_ia[i + 1], i));
-                else
-                    stop = Subdomain<K>::_a->_ia[i + 1];
-                if(std::abs(Subdomain<K>::_a->_a[stop - 1]) > HPDDM_EPS * HPDDM_PEN)
-                    continue;
-                for(unsigned int j = Subdomain<K>::_a->_ia[i]; j < stop && isBoundaryCond; ++j) {
-                    if(i != Subdomain<K>::_a->_ja[j] && std::abs(Subdomain<K>::_a->_a[j]) > HPDDM_EPS)
-                        isBoundaryCond = false;
-                    else if(i == Subdomain<K>::_a->_ja[j] && std::abs(Subdomain<K>::_a->_a[j] - K(1.0)) > HPDDM_EPS)
-                        isBoundaryCond = false;
-                }
+                bool boundary = (std::abs(Subdomain<K>::boundaryCond(i)) > HPDDM_EPS);
                 for(unsigned short nu = 0; nu < mu; ++nu) {
-                    if(!isBoundaryCond)
+                    if(!boundary)
                         storage[2 * nu + 1] += _d[i] * std::norm(tmp[nu * Subdomain<K>::_dof + i]);
                     if(std::abs(f[nu * Subdomain<K>::_dof + i]) > HPDDM_EPS * HPDDM_PEN)
-                        storage[2 * nu] += _d[i] * std::norm(f[nu * Subdomain<K>::_dof + i] / K(HPDDM_PEN));
+                        storage[2 * nu] += _d[i] * std::norm(f[nu * Subdomain<K>::_dof + i] / underlying_type<K>(HPDDM_PEN));
                     else
                         storage[2 * nu] += _d[i] * std::norm(f[nu * Subdomain<K>::_dof + i]);
                 }

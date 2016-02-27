@@ -44,7 +44,7 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
     }
     underlying_type<K>* dir;
     K* trash;
-    allocate(dir, trash, n, opt["variant"] == 2 ? 2 : (opt["orthogonalization"] != 2 ? 1 : 0), it);
+    allocate(dir, trash, n, opt["variant"] == 2 ? 2 : 1, it);
     bool alloc = A.setBuffer(1);
     K* z = trash + n;
     K* r = z + n;
@@ -55,9 +55,6 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
     A.GMV(x, z);
     std::copy_n(b, n, r);
     Blas<K>::axpy(&n, &(Wrapper<K>::d__2), z, &i__1, r, &i__1);
-    for(unsigned int i = 0; i < n; ++i)
-        if(std::abs(r[i]) > HPDDM_PEN * HPDDM_EPS)
-            r[i] = K();
 
     A.apply(r, p, 1, z);
 
@@ -80,7 +77,7 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
             }
         }
         A.GMV(p, z);
-        if(opt["orthogonalization"] != 2 && i > 1) {
+        if(i > 1) {
             Wrapper<K>::diag(n, d, z, trash);
             for(unsigned short k = 0; k < i - 1; ++k)
                 dir[1 + k] = -std::real(Blas<K>::dot(&n, trash, &i__1, p + (1 + k) * n, &i__1)) / dir[1 + it + k];
@@ -94,12 +91,10 @@ inline int IterativeMethod::CG(const Operator& A, const K* const b, K* const x, 
         Wrapper<K>::diag(n, d, p, trash);
         dir[1] = std::real(Blas<K>::dot(&n, z, &i__1, trash, &i__1));
         MPI_Allreduce(MPI_IN_PLACE, dir, 2, Wrapper<K>::mpi_underlying_type(), MPI_SUM, comm);
-        if(opt["orthogonalization"] != 2 || opt["variant"] == 2) {
-            dir[it + i] = dir[1];
-            std::copy_n(p, n, p + i * n);
-            if(opt["variant"] == 2)
-                std::copy_n(z, n, p + (it + i) * n);
-        }
+        dir[it + i] = dir[1];
+        std::copy_n(p, n, p + i * n);
+        if(opt["variant"] == 2)
+            std::copy_n(z, n, p + (it + i) * n);
         trash[0] = dir[0] / dir[1];
         Blas<K>::axpy(&n, trash, p, &i__1, x, &i__1);
         trash[0] = -trash[0];
