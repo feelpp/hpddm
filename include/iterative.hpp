@@ -33,13 +33,25 @@ struct EmptyOperator {
     void clearBuffer(const bool) const { }
     const underlying_type<K>* getScaling() const { return nullptr; }
 
-    const HPDDM::MatrixCSR<K>& _A;
-    EmptyOperator(HPDDM::MatrixCSR<K>* A) : _A(*A) { }
-    int getDof() const { return _A._n; }
+    const int _n;
+    EmptyOperator(int n) : _n(n) { }
+    int getDof() const { return _n; }
+};
+template<class Operator, class K>
+struct CustomOperator : EmptyOperator<K> {
+    const Operator* const _A;
+    CustomOperator(const Operator* const A, int n) : EmptyOperator<K>(n), _A(A) { }
+    void GMV(const K* const in, K* const out, const int& mu = 1) const;
+};
+template<class K>
+struct CustomOperator<MatrixCSR<K>, K> : EmptyOperator<K> {
+    const MatrixCSR<K>* const _A;
+    CustomOperator(const MatrixCSR<K>* const A) : EmptyOperator<K>(A ? A->_n : 0), _A(A) { }
     void GMV(const K* const in, K* const out, const int& mu = 1) const {
-        HPDDM::Wrapper<K>::csrmm(_A._sym, &(_A._n), &mu, _A._a, _A._ia, _A._ja, in, out);
+        HPDDM::Wrapper<K>::csrmm(_A->_sym, &(EmptyOperator<K>::_n), &mu, _A->_a, _A->_ia, _A->_ja, in, out);
     }
 };
+
 /* Class: Iterative method
  *  A class that implements various iterative methods. */
 class IterativeMethod {
@@ -93,7 +105,7 @@ class IterativeMethod {
         static void computeMin(const K* const* const h, K* const s, const short* const hasConverged, const int& mu, const int& deflated = -1, const int& shift = 0) {
             int ldh = std::distance(h[0], h[1]) / std::abs(deflated);
             if(deflated != -1) {
-                int dim = std::abs(*hasConverged) - shift;
+                int dim = std::abs(*hasConverged) - deflated * shift;
                 int info;
                 Lapack<K>::trtrs("U", "N", "N", &dim, &deflated, *h + deflated * shift * (1 + ldh), &ldh, s, &ldh, &info);
             }
@@ -107,7 +119,7 @@ class IterativeMethod {
         template<class Operator, class K, class T>
         static void addSol(const Operator& A, char variant, const int& n, K* const x, const int& ldh, const K* const s, T* const* const v, const short* const hasConverged, const int& mu, K* const work, const int& deflated = -1) {
             static_assert(std::is_same<K, typename std::remove_const<T>::type>::value, "Wrong types");
-            K* const correction = (variant == 'R' ? (std::is_const<T>::value ? (work + mu * n) : const_cast<K* const>(v[ldh / (deflated == -1 ? mu : deflated) - 1])) : work);
+            K* const correction = (variant == 'R' ? (std::is_const<T>::value ? (work + mu * n) : const_cast<K*>(v[ldh / (deflated == -1 ? mu : deflated) - 1])) : work);
             if(deflated == -1) {
                 int ldv = mu * n;
                 if(variant == 'L') {
@@ -151,20 +163,25 @@ class IterativeMethod {
             }
         }
         template<class Operator, class K, class T>
-        static void updateSolRecycling(const Operator& A, char variant, const int& n, K* const x, const K* const* const h, K* const s, K* const* const v, T* const norm, K* const C, K* const U, const short* const hasConverged, const int shift, const int mu, K* const work, const MPI_Comm& comm, const int& deflated = -1) {
+        static void updateSolRecycling(const Operator& A, char variant, const int& n, K* const x, const K* const* const h, K* const s, K* const* const v, T* const norm, const K* const C, const K* const U, const short* const hasConverged, const int shift, const int mu, K* const work, const MPI_Comm& comm, const int& deflated = -1) {
+            const Option& opt = *Option::get();
             const int ldh = std::distance(h[0], h[1]) / std::abs(deflated);
             const int dim = ldh / (deflated == -1 ? mu : deflated);
             if(C != nullptr && U != nullptr) {
                 computeMin(h, s + shift * (deflated == -1 ? mu : deflated), hasConverged, mu, deflated, shift);
                 const int ldv = (deflated == -1 ? mu : deflated) * n;
                 if(deflated == -1) {
-                    for(unsigned short nu = 0; nu < mu; ++nu) {
-                        if(std::abs(hasConverged[nu]) != 0) {
-                            K alpha = norm[nu];
-                            Blas<K>::gemv(&(Wrapper<K>::transc), &n, &shift, &alpha, C + nu * n, &ldv, v[shift] + nu * n , &i__1, &(Wrapper<K>::d__0), s + nu, &mu);
+                    if(opt.val<unsigned short>("recycle_same_system") != 0)
+                        std::fill_n(s, shift * mu, K());
+                    else {
+                        for(unsigned short nu = 0; nu < mu; ++nu) {
+                            if(std::abs(hasConverged[nu]) != 0) {
+                                K alpha = norm[nu];
+                                Blas<K>::gemv(&(Wrapper<K>::transc), &n, &shift, &alpha, C + nu * n, &ldv, v[shift] + nu * n , &i__1, &(Wrapper<K>::d__0), s + nu, &mu);
+                            }
                         }
+                        MPI_Allreduce(MPI_IN_PLACE, s, shift * mu, Wrapper<K>::mpi_type(), MPI_SUM, comm);
                     }
-                    MPI_Allreduce(MPI_IN_PLACE, s, shift * mu, Wrapper<K>::mpi_type(), MPI_SUM, comm);
                     for(unsigned short nu = 0; nu < mu; ++nu)
                         if(std::abs(hasConverged[nu]) != 0) {
                             int diff = std::abs(hasConverged[nu]) - shift;
@@ -172,17 +189,23 @@ class IterativeMethod {
                         }
                 }
                 else {
-                    std::copy_n(v[shift], deflated * n, work);
-                    Blas<K>::trmm("R", "U", "N", "N", &n, &deflated, &(Wrapper<K>::d__1), reinterpret_cast<K* const>(norm), &ldh, work, &n);
                     int bK = deflated * shift;
-                    Blas<K>::gemm(&(Wrapper<K>::transc), "N", &bK, &deflated, &n, &(Wrapper<K>::d__1), C, &n, work, &n, &(Wrapper<K>::d__0), s, &ldh);
-                    for(unsigned short i = 0; i < deflated; ++i)
-                        std::copy_n(s + i * ldh, bK, work + i * bK);
-                    MPI_Allreduce(MPI_IN_PLACE, work, bK * deflated, Wrapper<K>::mpi_type(), MPI_SUM, comm);
-                    for(unsigned short i = 0; i < deflated; ++i)
-                        std::copy_n(work + i * bK, bK, s + i * ldh);
+                    K beta;
+                    if(opt.val<unsigned short>("recycle_same_system") != 0)
+                        beta = K();
+                    else {
+                        std::copy_n(v[shift], deflated * n, work);
+                        Blas<K>::trmm("R", "U", "N", "N", &n, &deflated, &(Wrapper<K>::d__1), reinterpret_cast<K*>(norm), &ldh, work, &n);
+                        Blas<K>::gemm(&(Wrapper<K>::transc), "N", &bK, &deflated, &n, &(Wrapper<K>::d__1), C, &n, work, &n, &(Wrapper<K>::d__0), s, &ldh);
+                        for(unsigned short i = 0; i < deflated; ++i)
+                            std::copy_n(s + i * ldh, bK, work + i * bK);
+                        MPI_Allreduce(MPI_IN_PLACE, work, bK * deflated, Wrapper<K>::mpi_type(), MPI_SUM, comm);
+                        for(unsigned short i = 0; i < deflated; ++i)
+                            std::copy_n(work + i * bK, bK, s + i * ldh);
+                        beta = Wrapper<K>::d__1;
+                    }
                     int diff = *hasConverged - deflated * shift;
-                    Blas<K>::gemm("N", "N", &bK, &deflated, &diff, &(Wrapper<K>::d__2), h[shift], &ldh, s + shift * deflated, &ldh, &(Wrapper<K>::d__1), s, &ldh);
+                    Blas<K>::gemm("N", "N", &bK, &deflated, &diff, &(Wrapper<K>::d__2), h[shift], &ldh, s + shift * deflated, &ldh, &beta, s, &ldh);
                 }
                 std::copy_n(U, shift * ldv, v[dim * (variant == 'F')]);
                 addSol(A, variant, n, x, ldh, s, static_cast<const K* const* const>(v + dim * (variant == 'F')), hasConverged, mu, work, deflated);
@@ -238,6 +261,18 @@ class IterativeMethod {
                     else
                         norm[nu] += std::norm(b[nu * n + i]);
                 }
+            }
+        }
+        template<class K>
+        static void epsilon(K& tol, const unsigned char verbosity = 0) {
+            if(std::abs(tol) < std::numeric_limits<underlying_type<K>>::epsilon()) {
+                if(verbosity > 0)
+                    std::cout << "WARNING -- the tolerance of the iterative method was set to " << tol
+#if __cpp_rtti || defined(__GXX_RTTI) || defined(__INTEL_RTTI__) || defined(_CPPRTTI)
+                     << " which is lower than the machine epsilon for type " << demangle(typeid(underlying_type<K>).name())
+#endif
+                     << ", forcing the tolerance to " << 2 * std::numeric_limits<underlying_type<K>>::epsilon() << std::endl;
+                tol = 2 * std::numeric_limits<underlying_type<K>>::epsilon();
             }
         }
         /* Function: orthogonalization

@@ -70,7 +70,6 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
         typedef Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>, K> super;
         /* Function: initialize
          *  Sets <Schwarz::d>. */
-        template<class Container = std::vector<int>>
         void initialize(underlying_type<K>* const& d) {
             _d = d;
         }
@@ -100,7 +99,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
                     opt["schwarz_method"] = 0;
                 }
             }
-            unsigned short reuse = opt.val<unsigned short>("reuse_preconditioner", 0);
+            unsigned short reuse = opt.val<unsigned short>("reuse_preconditioner");
             if(reuse <= 1)
                 super::_s.template numfact<N>(_type == Prcndtnr::OS || _type == Prcndtnr::OG ? A : Subdomain<K>::_a);
             if(reuse >= 1)
@@ -343,7 +342,7 @@ class Schwarz : public Preconditioner<Solver, CoarseOperator<CoarseSolver, S, K>
                         intoOverlap.insert(i);
             std::vector<std::vector<std::pair<unsigned int, K>>> tmp(intoOverlap.size());
             unsigned int k, iPrev = 0;
-#ifdef __OPENMP
+#ifdef _OPENMP
 #pragma omp parallel for schedule(static, HPDDM_GRANULARITY) reduction(+ : iPrev)
 #endif
             for(k = 0; k < intoOverlap.size(); ++k) {

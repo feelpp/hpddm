@@ -25,10 +25,15 @@
    along with HPDDM.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifdef HPDDM_NUMBERING
 #undef HPDDM_NUMBERING
-#endif
+#undef HPDDM_SCHWARZ
+#undef HPDDM_FETI
+#undef HPDDM_BDD
+
 #define HPDDM_NUMBERING 'F'
+#define HPDDM_SCHWARZ 0
+#define HPDDM_FETI 0
+#define HPDDM_BDD 0
 
 #include "HPDDM.hpp"
 
@@ -38,18 +43,18 @@ typedef std::complex<double> K;
 typedef double K;
 #endif
 
-struct CustomOperator : public HPDDM::EmptyOperator<K> {
-    CustomOperator(HPDDM::MatrixCSR<K>* A) : HPDDM::EmptyOperator<K>(A) { }
+struct CustomOperator : HPDDM::CustomOperator<HPDDM::MatrixCSR<K>, K> {
+    using HPDDM::CustomOperator<HPDDM::MatrixCSR<K>, K>::CustomOperator;
     template<bool = true>
     void apply(const K* const in, K* const out, const unsigned short& mu = 1, K* = nullptr, const unsigned short& = 0) const {
         HPDDM::Option& opt = *HPDDM::Option::get();
         if(opt.app()["diagonal_scaling"] == 0)
-            std::copy_n(in, mu * _A._n, out);
+            std::copy_n(in, mu * _n, out);
         else
-            for(int i = 0; i < _A._n; ++i) {
-                int mid = std::distance(_A._ja, std::upper_bound(_A._ja + _A._ia[i] - _A._ia[0], _A._ja + _A._ia[i + 1] - _A._ia[0], i + _A._ia[0])) - 1;
+            for(int i = 0; i < _n; ++i) {
+                int mid = std::distance(_A->_ja, std::upper_bound(_A->_ja + _A->_ia[i] - _A->_ia[0], _A->_ja + _A->_ia[i + 1] - _A->_ia[0], i + _A->_ia[0])) - 1;
                 for(unsigned short nu = 0; nu < mu; ++nu)
-                    out[nu * _A._n + i] = in[nu * _A._n + i] / _A._a[mid];
+                    out[nu * _n + i] = in[nu * _n + i] / _A->_a[mid];
             }
     }
 };
@@ -57,6 +62,10 @@ struct CustomOperator : public HPDDM::EmptyOperator<K> {
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     HPDDM::Option& opt = *HPDDM::Option::get();
+    opt["gmres_restart"] =      40;
+    opt["recycle"]       =      20;
+    opt["max_it"]        =    1000;
+    opt["tol"]           = 1.0e-10;
     opt.parse(argc, argv, 1, {
         std::forward_as_tuple("mu=<1>", "Number of right-hand sides.", HPDDM::Option::Arg::integer),
         std::forward_as_tuple("diagonal_scaling=<0>", "Use the diagonal of the matrix as a preconditioner.", HPDDM::Option::Arg::integer),
@@ -84,7 +93,7 @@ int main(int argc, char** argv) {
             s.reserve(size);
             std::stringstream ss(buffer);
             std::string item;
-            while (std::getline(ss, item, ' ')) {
+            while(std::getline(ss, item, ' ')) {
                 item.erase(std::remove(item.begin(), item.end(), '\n'), item.end());
                 if(item.size() > 0)
                     s.emplace_back(item);
@@ -142,11 +151,12 @@ int main(int argc, char** argv) {
     std::cout << "Total number of iterations: " << it << std::endl;
     MPI_Finalize();
     if(status == 0 && opt.any_of("krylov_method", { 3, 4 })) {
+        const char variant = (!opt.set("variant") ? 'R' : opt["variant"] == 0 ? 'L' : 'F');
         if(opt.app()["diagonal_scaling"] == 0)
             status = !(it > 2346 && it < 2366);
-        else if(opt["variant"] == 0)
+        else if(variant == 'L')
             status = !(it > 2052 && it < 2072);
-        else if(opt["variant"] == 1)
+        else if(variant == 'R')
             status = !(it > 2055 && it < 2075);
     }
     return status;

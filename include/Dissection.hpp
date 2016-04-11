@@ -24,8 +24,10 @@
 #ifndef _HPDDM_DISSECTION_
 #define _HPDDM_DISSECTION_
 
-#if !HPDDM_MKL
+#ifndef INTEL_MKL_VERSION
 # define BLAS_GENERIC
+#else
+# define BLAS_MKL
 #endif
 #define DD_REAL
 #include "Driver/DissectionSolver.hpp"
@@ -47,9 +49,15 @@ class DissectionSub {
         static constexpr char _numbering = 'C';
         template<char N = HPDDM_NUMBERING>
         void numfact(MatrixCSR<K>* const& A, bool detection = false, K* const& schur = nullptr) {
+            static_assert(N == 'C' || N == 'F', "Unknown numbering");
             static_assert(std::is_same<double, underlying_type<K>>::value, "Dissection only supports double-precision floating-point numbers");
             if(!_dslv) {
-                _dslv = new DissectionSolver<K, underlying_type<K>>(1, false, 0, nullptr);
+#ifdef _OPENMP
+                int num_threads = omp_get_max_threads();
+#else
+                int num_threads = 1;
+#endif
+                _dslv = new DissectionSolver<K, underlying_type<K>>(num_threads, false, 0, nullptr);
                 if(N == 'F') {
                     std::for_each(A->_ia, A->_ia + A->_n + 1, [](int& i) { --i; });
                     std::for_each(A->_ja, A->_ja + A->_nnz, [](int& i) { --i; });
@@ -60,7 +68,7 @@ class DissectionSub {
                     std::for_each(A->_ia, A->_ia + A->_n + 1, [](int& i) { ++i; });
                 }
             }
-            _dslv->NumericFact(0, A->_a, Option::get()->val<unsigned short>("dissection_kkt_scaling") ? KKT_SCALING : DIAGONAL_SCALING, Option::get()->val("dissection_pivot_tol", 1.0 / HPDDM_PEN));
+            _dslv->NumericFact(0, A->_a, Option::get()->val<char>("dissection_kkt_scaling", 0) ? KKT_SCALING : DIAGONAL_SCALING, Option::get()->val("dissection_pivot_tol", 1.0 / HPDDM_PEN));
         }
         unsigned short deficiency() const { return _dslv->kern_dimension(); }
         void solve(K* const x, const unsigned short& n = 1) const {

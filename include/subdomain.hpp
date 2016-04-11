@@ -56,21 +56,7 @@ class Subdomain {
     public:
         Subdomain() : _buff(), _rq(), _map(), _a() { }
         ~Subdomain() {
-            if(_a) {
-                int rankWorld;
-                MPI_Comm_rank(_communicator, &rankWorld);
-                const Option& opt = *Option::get();
-                std::string filename = opt.prefix("dump_local_matrices", true);
-                if(filename.size() == 0)
-                    filename = opt.prefix("dump_local_matrix_" + to_string(rankWorld), true);
-                if(filename.size() != 0) {
-                    int sizeWorld;
-                    MPI_Comm_size(_communicator, &sizeWorld);
-                    std::ofstream output { filename + "_" + to_string(rankWorld) + "_" + to_string(sizeWorld) + ".txt" };
-                    output << *_a;
-                }
-                delete _a;
-            }
+            destroyMatrix(nullptr);
             vectorNeighbor().swap(_map);
             delete [] _rq;
             delete [] _buff;
@@ -286,7 +272,8 @@ class Subdomain {
                     std::ofstream output { filename + "_" + to_string(rankWorld) + "_" + to_string(sizeWorld) + ".txt" };
                     output << *_a;
                 }
-                _a->destroy(dtor);
+                if(dtor)
+                    _a->destroy(dtor);
                 delete _a;
                 _a = nullptr;
             }
@@ -660,7 +647,7 @@ class Subdomain {
                 ia[0] = 0;
                 nnz = 0;
                 for(unsigned int i = 0; i < dof; ++i) {
-                    std::sort(tmp[i].begin(), tmp[i].end());
+                    std::sort(tmp[i].begin(), tmp[i].end(), [](const std::pair<unsigned int, K>& lhs, const std::pair<unsigned int, K>& rhs) { return lhs.first < rhs.first; });
                     for(std::pair<unsigned int, K>& p : tmp[i]) {
                         ja[nnz] = p.first;
                         c[nnz++] = p.second;

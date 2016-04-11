@@ -21,9 +21,6 @@
    along with HPDDM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef HPDDM_NUMBERING
-#define HPDDM_NUMBERING       'C'
-#endif
 #include <Python.h>
 #include <HPDDM.hpp>
 
@@ -53,12 +50,12 @@ const char symCoarse = 'G';
 const char symCoarse = 'S';
 #endif
 
-struct CustomOperator : public HPDDM::EmptyOperator<K> {
+struct CustomOperator : HPDDM::CustomOperator<HPDDM::MatrixCSR<K>, K> {
     void (* _precond)(const HPDDM::pod_type<K>*, HPDDM::pod_type<K>*, int, int);
-    CustomOperator(HPDDM::MatrixCSR<K>* A, void (*precond)(const HPDDM::pod_type<K>*, HPDDM::pod_type<K>*, int, int)) : HPDDM::EmptyOperator<K>(A), _precond(precond) { }
+    CustomOperator(HPDDM::MatrixCSR<K>* A, void (*precond)(const HPDDM::pod_type<K>*, HPDDM::pod_type<K>*, int, int)) : HPDDM::CustomOperator<HPDDM::MatrixCSR<K>, K>(A), _precond(precond) { }
     template<bool = true>
     void apply(const K* const in, K* const out, const unsigned short& mu = 1, K* = nullptr, const unsigned short& = 0) const {
-        _precond(reinterpret_cast<const HPDDM::pod_type<K>*>(in), reinterpret_cast<HPDDM::pod_type<K>*>(out), _A._n, mu);
+        _precond(reinterpret_cast<const HPDDM::pod_type<K>*>(in), reinterpret_cast<HPDDM::pod_type<K>*>(out), _n, mu);
     }
 };
 
@@ -66,7 +63,7 @@ extern "C" {
 char numbering = HPDDM_NUMBERING;
 unsigned short scalar = std::is_same<K, float>::value ? 0 : std::is_same<K, double>::value ? 1 : std::is_same<K, std::complex<float>>::value ? 2 : 3;
 
-void* const optionGet() {
+void* optionGet() {
     return HPDDM::Option::get().get();
 }
 int optionParse(void* option, char* args, bool display) {

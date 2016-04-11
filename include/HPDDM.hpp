@@ -75,7 +75,9 @@ static_assert(HPDDM_NUMBERING == 'C' || HPDDM_NUMBERING == 'F', "Unknown numberi
 #ifdef __MINGW32__
 # include <inttypes.h>
 #endif
-#include <mpi.h>
+#ifndef MPI_VERSION
+# include <mpi.h>
+#endif
 #if HPDDM_ICOLLECTIVE
 # if !((OMPI_MAJOR_VERSION > 1 || (OMPI_MAJOR_VERSION == 1 && OMPI_MINOR_VERSION >= 7)) || MPICH_NUMVERSION >= 30000000)
 #  pragma message("You cannot use nonblocking MPI collective operations with that MPI implementation")
@@ -117,6 +119,7 @@ static_assert(HPDDM_NUMBERING == 'C' || HPDDM_NUMBERING == 'F', "Unknown numberi
 # include <mkl_trans.h>
 #endif // HPDDM_MKL
 
+#include "preprocessor_check.hpp"
 #ifdef __cplusplus
 # include <iostream>
 # include <fstream>
@@ -127,6 +130,10 @@ static_assert(HPDDM_NUMBERING == 'C' || HPDDM_NUMBERING == 'F', "Unknown numberi
 # include <algorithm>
 # include <vector>
 # include <numeric>
+# include <functional>
+# if !__cpp_rtti && !defined(__GXX_RTTI) && !defined(__INTEL_RTTI__) && !defined(_CPPRTTI)
+#  pragma message("Consider enabling RTTI support with your C++ compiler")
+# endif
 static_assert(2 * sizeof(double) == sizeof(std::complex<double>) && 2 * sizeof(float) == sizeof(std::complex<float>) && 2 * sizeof(float) == sizeof(double), "Incorrect sizes");
 # ifdef __GNUG__
 #  include <cxxabi.h>
@@ -155,11 +162,11 @@ inline std::string demangle(const char* name) { return name; }
 # ifdef __MINGW32__
 #  include <sstream>
 template<class T>
-inline T sto(std::string s, typename std::enable_if<std::is_same<T, int>::value>::type* = nullptr) {
+inline T sto(const std::string& s, typename std::enable_if<std::is_same<T, int>::value>::type* = nullptr) {
     return atoi(s.c_str());
 }
 template<class T>
-inline T sto(std::string s, typename std::enable_if<std::is_same<T, double>::value || std::is_same<T, float>::value>::type* = nullptr) {
+inline T sto(const std::string& s, typename std::enable_if<std::is_same<T, float>::value || std::is_same<T, double>::value>::type* = nullptr) {
     return atof(s.c_str());
 }
 template<class T>
@@ -170,20 +177,27 @@ inline std::string to_string(const T& x) {
 }
 # else
 template<class T>
-inline T sto(std::string s, typename std::enable_if<std::is_same<T, int>::value>::type* = nullptr) {
+inline T sto(const std::string& s, typename std::enable_if<std::is_same<T, int>::value>::type* = nullptr) {
     return std::stoi(s);
 }
 template<class T>
-inline T sto(std::string s, typename std::enable_if<std::is_same<T, float>::value>::type* = nullptr) {
+inline T sto(const std::string& s, typename std::enable_if<std::is_same<T, float>::value>::type* = nullptr) {
     return std::stof(s);
 }
 template<class T>
-inline T sto(std::string s, typename std::enable_if<std::is_same<T, double>::value>::type* = nullptr) {
+inline T sto(const std::string& s, typename std::enable_if<std::is_same<T, double>::value>::type* = nullptr) {
     return std::stod(s);
 }
 template<class T>
 inline std::string to_string(const T& x) { return std::to_string(x); }
 # endif // __MINGW32__
+template<class T>
+inline T sto(const std::string& s, typename std::enable_if<std::is_same<T, std::complex<float>>::value || std::is_same<T, std::complex<double>>::value>::type* = nullptr) {
+    std::istringstream stm(s);
+    T cplx;
+    stm >> cplx;
+    return cplx;
+}
 template<class T>
 using alias = T;
 
@@ -201,7 +215,7 @@ template<class T>
 using pod_type = typename std::conditional<std::is_same<underlying_type<T>, T>::value, T, void*>::type;
 
 template<class>
-struct is_substructuring_method : std::false_type { };
+struct is_substructuring_method : public std::false_type { };
 
 template<class T>
 inline void hash_range(std::size_t& seed, T begin, T end) {
@@ -217,8 +231,6 @@ inline void hash_range(std::size_t& seed, T begin, T end) {
 #  endif
 # endif
 # include "option.hpp"
-# include "enum.hpp"
-# include "BLAS.hpp"
 # if defined(INTEL_MKL_VERSION) && INTEL_MKL_VERSION < 110201 && !defined(__INTEL_COMPILER)
 #  ifdef __clang__
 #   pragma clang diagnostic push
@@ -228,6 +240,7 @@ inline void hash_range(std::size_t& seed, T begin, T end) {
 #   pragma GCC diagnostic ignored "-Wwrite-strings"
 #  endif
 # endif
+# include "BLAS.hpp"
 # include "wrapper.hpp"
 # if defined(INTEL_MKL_VERSION) && INTEL_MKL_VERSION < 110201 && !defined(__INTEL_COMPILER)
 #  ifdef __clang__
@@ -237,47 +250,47 @@ inline void hash_range(std::size_t& seed, T begin, T end) {
 #  endif
 # endif
 # include "matrix.hpp"
+# include "dmatrix.hpp"
+# if !HPDDM_MKL
+#  ifdef MKL_PARDISOSUB
+#   undef MKL_PARDISOSUB
+#   define MUMPSSUB
+#  endif
+#  ifdef DMKL_PARDISO
+#   undef DMKL_PARDISO
+#   define DMUMPS
+#  endif
+# endif // HPDDM_MKL
+# if defined(DMUMPS) || defined(MUMPSSUB)
+#  include "MUMPS.hpp"
+# endif
+# if defined(DMKL_PARDISO) || defined(MKL_PARDISOSUB)
+#  include "MKL_PARDISO.hpp"
+# endif
+# if defined(DPASTIX) || defined(PASTIXSUB)
+#  include "PaStiX.hpp"
+# endif
+# if defined(DHYPRE)
+#  include "Hypre.hpp"
+# endif
+# if defined(SUITESPARSESUB) || defined(DSUITESPARSE)
+#  include "SuiteSparse.hpp"
+# endif
+# ifdef DISSECTIONSUB
+#  include "Dissection.hpp"
+# endif
+# if !defined(SUBDOMAIN) || !defined(COARSEOPERATOR)
+#  undef HPDDM_SCHWARZ
+#  undef HPDDM_FETI
+#  undef HPDDM_BDD
+#  define HPDDM_SCHWARZ       0
+#  define HPDDM_FETI          0
+#  define HPDDM_BDD           0
+# endif
 # ifndef HPDDM_MINIMAL
-#  include "dmatrix.hpp"
-
-#  if !HPDDM_MKL
-#   ifdef MKL_PARDISOSUB
-#    undef MKL_PARDISOSUB
-#    define MUMPSSUB
-#   endif
-#   ifdef DMKL_PARDISO
-#    undef DMKL_PARDISO
-#    define DMUMPS
-#   endif
-#  endif // HPDDM_MKL
-#  if defined(DMUMPS) || defined(MUMPSSUB)
-#   include "MUMPS.hpp"
-#  endif
-#  if defined(DMKL_PARDISO) || defined(MKL_PARDISOSUB)
-#   include "MKL_PARDISO.hpp"
-#  endif
-#  if defined(DPASTIX) || defined(PASTIXSUB)
-#   include "PaStiX.hpp"
-#  endif
-#  if defined(DHYPRE)
-#   include "Hypre.hpp"
-#  endif
-#  if defined(SUITESPARSESUB) || defined(DSUITESPARSE)
-#   include "SuiteSparse.hpp"
-#  endif
-#  ifdef DISSECTIONSUB
-#   include "Dissection.hpp"
-#  endif
-#  if !defined(SUBDOMAIN) || !defined(COARSEOPERATOR)
-#   undef HPDDM_SCHWARZ
-#   undef HPDDM_FETI
-#   undef HPDDM_BDD
-#   define HPDDM_SCHWARZ       0
-#   define HPDDM_FETI          0
-#   define HPDDM_BDD           0
-#  endif
-#  include "eigensolver.hpp"
 #  include "LAPACK.hpp"
+#  include "enum.hpp"
+#  include "eigensolver.hpp"
 #  if HPDDM_SCHWARZ
 #   ifndef EIGENSOLVER
 #    ifdef INTEL_MKL_VERSION
@@ -307,8 +320,8 @@ using HpBdd = HPDDM::Bdd<SUBDOMAIN, COARSEOPERATOR, S, K>;
 #  include "GMRES.hpp"
 #  include "GCRODR.hpp"
 #  include "CG.hpp"
-#  include "option_impl.hpp"
 # endif // HPDDM_MINIMAL
+# include "option_impl.hpp"
 #else
 # include "BLAS.hpp"
 # include "LAPACK.hpp"

@@ -316,10 +316,17 @@ class Option : private Singleton {
                         if(found != std::string::npos)
                             map[str] = std::count(empty.cbegin(), empty.cbegin() + found, '|');
 #endif
-                        else
-                            std::cerr << "'" << val << "' doesn't match the regular expression '" << empty << "' for option '" << str << "'" << std::endl;
+                        else {
+                            if(boolean && (val.compare("true") == 0 || val.compare("yes") == 0))
+                                map[str] = 1;
+                            else if(boolean && (val.compare("false") == 0 || val.compare("no") == 0))
+                                map[str];
+                            else
+                                std::cerr << "'" << val << "' doesn't match the regular expression '" << empty << "' for option '" << str << "'" << std::endl;
+                        }
                     }
                     else if(success) {
+#if __cpp_rtti || defined(__GXX_RTTI) || defined(__INTEL_RTTI__) || defined(_CPPRTTI)
                         auto target = std::get<2>(*it).template target<bool (*)(const std::string&, const std::string&, bool)>();
                         if(!target || *target != Arg::argument)
                             map[str] = sto<double>(val);
@@ -331,6 +338,14 @@ class Option : private Singleton {
                                 }
                             map[str + "_" + val] = -static_cast<int>(str.size()) - 10000000;
                         }
+#else
+                        try {
+                            map[str] = sto<double>(val);
+                        }
+                        catch(const std::invalid_argument& ia) {
+                            std::cerr << "invalid_argument error: " << ia.what() << " (key: " << str << ", value: " << val << ")" << std::endl;
+                        }
+#endif
                     }
                 }
                 else

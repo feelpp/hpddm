@@ -30,41 +30,21 @@
 #include <cmumps_c.h>
 #include <zmumps_c.h>
 
+#define HPDDM_GENERATE_MUMPS(C, c, T, M)                                                                     \
+template<>                                                                                                   \
+struct MUMPS_STRUC_C<T> {                                                                                    \
+    typedef C ## MUMPS_STRUC_C trait;                                                                        \
+    typedef M mumps_type;                                                                                    \
+    static void mumps_c(C ## MUMPS_STRUC_C* const id) { c ## mumps_c(id); }                                  \
+};
+
 namespace HPDDM {
 template<class>
 struct MUMPS_STRUC_C { };
-template<>
-struct MUMPS_STRUC_C<float> {
-    typedef SMUMPS_STRUC_C trait;
-    typedef float mumps_type;
-    static void mumps_c(SMUMPS_STRUC_C* id) {
-        smumps_c(id);
-    }
-};
-template<>
-struct MUMPS_STRUC_C<double> {
-    typedef DMUMPS_STRUC_C trait;
-    typedef double mumps_type;
-    static void mumps_c(DMUMPS_STRUC_C* id) {
-        dmumps_c(id);
-    }
-};
-template<>
-struct MUMPS_STRUC_C<std::complex<float>> {
-    typedef CMUMPS_STRUC_C trait;
-    typedef mumps_complex mumps_type;
-    static void mumps_c(CMUMPS_STRUC_C* id) {
-        cmumps_c(id);
-    }
-};
-template<>
-struct MUMPS_STRUC_C<std::complex<double>> {
-    typedef ZMUMPS_STRUC_C trait;
-    typedef mumps_double_complex mumps_type;
-    static void mumps_c(ZMUMPS_STRUC_C* id) {
-        zmumps_c(id);
-    }
-};
+HPDDM_GENERATE_MUMPS(S, s, float, float)
+HPDDM_GENERATE_MUMPS(D, d, double, double)
+HPDDM_GENERATE_MUMPS(C, c, std::complex<float>, mumps_complex)
+HPDDM_GENERATE_MUMPS(Z, z, std::complex<double>, mumps_double_complex)
 
 #ifdef DMUMPS
 #undef HPDDM_CHECK_SUBDOMAIN
@@ -116,7 +96,7 @@ class Mumps : public DMatrix {
             _id->comm_fortran = MPI_Comm_c2f(DMatrix::_communicator);
             const Option& opt = *Option::get();
             if(S == 'S')
-                _id->sym = opt.val<unsigned short>("master_not_spd", 0) ? 2 : 1;
+                _id->sym = opt.val<char>("master_not_spd", 0) ? 2 : 1;
             else
                 _id->sym = 0;
             MUMPS_STRUC_C<K>::mumps_c(_id);
